@@ -1,0 +1,509 @@
+---
+title: "Data Preparation Using Eucdata"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+This new dataprep version uses the trait_medians object (long-format data) from the eucdata package which automatically removes the grampians SD from the combined_traits object from which those traits are calculated. The allometric traits of Relative Height and Relative Bark Thickness recalculated according to a more accurate model as of November 2020, same as the previous version. The medians here were calculated after data from each of the four datasets were pooled rather than the the previous method (which also used the datasets from the eucdata package instead) where the medians were taken first by dataset and then by taxon for those taxa that occured in more than a single dataset. The max. height data also came from taking the median of all the subspecies where it was not specifies unless otherwise stated. 
+    -I need to re-check so of the subspecies that were originally manually assigned and keep my        assignment for those where I'm sure (based on distribution etc.) that my previously              manually assigned value is more correct.
+
+
+## All Required Packages and Functions
+
+```{r}
+
+# # installation of eucdata package
+# install.packages("devtools")
+# devtools::install_github('smwindecker/eucdata',
+#                           ref = 'main',
+#                           auth_token = "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")
+
+# # reinstallation of eucdata package for mostly debugging purposes
+# install.packages("devtools")
+# devtools::install_github('smwindecker/eucdata',
+#                           ref = 'main',
+#                           auth_token = "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")
+
+
+
+# create_modeldata(datasets = unique(combined_traits$dataset),
+#                  combined_traits,
+#                  euclid)
+# A <- combined_traits
+#install.packages(")dplyr")
+#install.packages("ggtree")
+#remotes::install_github("YuLab-SMU/ggtree") #let's see if this works?
+
+#install.packages('ozmaps')
+
+#install.packages('viridis')
+
+library(ape) #for basic dealing with phylogenies
+library(BiocManager) # for installing ggtree
+library(dplyr)
+library(eucdata) # New data repository
+library(ggtree)
+library(readxl) # to input data from csv, especially taxon name-status checking
+library(rmarkdown)
+library(phangorn) # contains the superTree() funciton used to combine various phylogenies to create the tree used in this analysis
+library(caper) # for running all the pgls-fitting models (lambda values, trait-trait correlations, trait differences between )
+library(stringr)
+library(paleotree) #for using the collapseNodes() function, which we no longer need anyway
+library(ggplot2)
+library(tidyr)
+library(corrplot) #for creating tables of coloured ellipses that represent correlation strengths
+library(qgraph) #for visualising trait relationships as network diagrams
+library(plot.matrix) # for visualising matrices as coloured tiles eg. the lambda matrix
+library(ozmaps)
+library(viridis)
+
+plot_dim1 <- function(phy) {
+  plot(ggtree(phy) +xlim(0, 35) + geom_tiplab(size=5)) #plots with the correct size text and alignment for 158-225 taxa trees like I will be using
+}
+#plot_dim1(con.tree)
+
+plot_dim1_nl <- function(phy) {
+  plot(ggtree(phy) + xlim(0, 35) +geom_tiplab(size=5) + geom_label(aes(label=node)))
+}
+
+#for finding the most recent common ancestor of two taxa
+pairwise_mrca <- function(tree, basal.taxon, tipward.taxon) {
+  mrca.tree <- as.data.frame(mrca(tree))
+  subset.mrca.tree <- data.frame(mrca.tree[row.names(mrca.tree) %in% c(basal.taxon, tipward.taxon), names(mrca.tree)[names(mrca.tree) %in% c(basal.taxon, tipward.taxon)]]) 
+mrca.node <- min(subset.mrca.tree[subset.mrca.tree > length(tree$tip.label)])
+return(mrca.node)
+}
+
+# Finds the node from which another node branches
+parent_node <- function(tree, child.node) {
+  all.nodes <- as.data.frame(tree$edge)
+  names(all.nodes) <- c("start", "end")
+  parent.node <- all.nodes[all.nodes$end == child.node, c("start")]
+  return(parent.node)
+}
+
+# To find all nodes branching from parent node (includes both named tips and internal nodes)
+child_nodes <- function(tree, parent.node) {
+  all.nodes <- as.data.frame(tree$edge)
+  names(all.nodes) <- c("start", "end")
+  child.nodes <- all.nodes[all.nodes$start == parent.node, c("end")]
+  return(child.nodes)
+}
+
+# To find the internal (non-tip) nodes branching from the parent node
+child_nodes_int <- function(tree, parent.node) {
+  all.nodes <- as.data.frame(tree$edge)
+  names(all.nodes) <- c("start", "end")
+  child.nodes <- all.nodes[all.nodes$start == parent.node, c("end")]
+  child.nodes <- child.nodes[is.na(child.nodes)]
+}
+
+# To find the tip.labels/taxon_names of all the tips descended from a particular node number. Hence, this funciton does require you to already know the node number but the above functions should deal with that
+child_tips <- function(tree, parent.node) {
+  all.nodes <- as.data.frame(tree$edge)
+  names(all.nodes) <- c("start", "end")
+  child.nodes <- all.nodes[all.nodes$start == parent.node, c("end")]
+  # for(i in child.nodes) {
+  #   child.tips <- rep(NA, max(tree$edge))
+  #   if(i <= length(tree$tip.label))
+  #   {
+  #     child.tips[i] <- tree$tip.label[i]
+  #   }
+  # }
+  child.tips <- tree$tip.label[child.nodes] #finds the tip labels of all the child nodes
+  child.tips <- child.tips[!is.na(child.tips)] #only returns non-NA tip names i.e.non-internal nodes
+  return(child.tips)
+}
+
+#the following function allows objects that are themselves comprised of a list of several object to be repeated and each repeat be a single element of the list instead of contributing each of their constituent elements separately
+rep_grouped <- function(X, n) {
+  x <- list() 
+  for (i in 1:n) {
+    x[[i]] <- X
+  }
+  return(x)
+}
+
+# uses the above altered list-of-lists repetition function above to: repeat the process of creating a supertree from the same set of input trees a given number of times by list-applying the superTree() function to a list of identical lists of the inputs trees. In this version of this function, the superTree funtion is being applied to different but identical elements of a list of length n
+replicate_supertree <- function(trees, n){
+  x <- rep_grouped(trees, n)
+  x <- lapply(x, function(treelist) {
+    x1 <- superTree(treelist, method = "MRP", rooted = TRUE)
+    x1$edge.length <- NULL
+    return(x1)
+    })
+  return(x)
+}
+
+# does the same as the above funciton but a tad more efficiently. Here, instead of applying each superTree() interation to a differnt element of a list of indetical sets of input trees, this time the function is interatively being repeated and its output being stored as the single element of 
+replicate_supertree2 <- function(trees, n) {
+  l <- list()
+for (i in 1:n) {
+  tree <- superTree(trees, method = "MRP", rooted = TRUE)
+  tree$edge.length <- NULL
+  l[[i]] <- tree
+}
+  return(l)
+}
+
+#the following allows the replacement of a single tip in a phylogeny with a clade of at least two related taxa (replacing a tip with another single tip can be more done by simply renaming the tip for which a function already exists)
+replace_tip <- function(tree, tip, new_clade) {
+  node <- which(tree$tip.label == tip) #finds the tip-number of tip-taxon to be replaced
+  new_clade$tip.label <- paste0(new_clade$tip.label, "__new") #adds id tag to new tips so that, in case one of the new tips is the same the the one being replaced, we do in fact prune only the old tip at the end
+  new_clade$root.edge <- 0 #sets root edge of new clade to be added onto the tree so that it foes to the right place and all new clades have standard behaviour under this function
+  tree <- bind.tree(tree, new_clade, where = parent_node(tree, node)) #adds the new clade as a sister taxon to the tip-to-be-replaced, attaching it at the parent node
+  tree <- drop.tip(tree, tip) #deletes old tip
+  tree$tip.label <- sub("__new", "", tree$tip.label) #removes new-tip ID tag
+  return(tree)
+}
+
+#the following allows the replacement of an entire clade with another clade of at leats two related taxa
+replace_clade <- function(tree, basal_clade_tip, tipward_clade_tip, new_clade) { 
+  clade_node <- pairwise_mrca(tree, basal_clade_tip, tipward_clade_tip)
+  old_tips <- clade.members(clade_node, tree, tip.labels = TRUE)
+  new_clade$tip.label <- paste0(new_clade$tip.label, "__new") #adds id tag to new tips so that, in case one of the new tips is the same the the one being replaced, we do in fact prune only the old tip at the end
+  new_clade$root.edge <- 0 #sets root edge of new clade to be added onto the tree so that it foes to the right place and all new clades have standard behaviour under this function
+  tree <- bind.tree(tree, new_clade, where = parent_node(tree, clade_node)) #adds the new clade as a sister taxon to the tip-to-be-replaced, attaching it at the parent node
+  tree <- drop.tip(tree, old_tips) #deletes old tips based on what the descendent tips were on the unaltered tree before the new clade was added, which should be different from those that have been added now and have the "__new" tag
+  tree$tip.label <- sub("__new", "", tree$tip.label) #removes new-tip ID tag
+  return(tree)
+}
+
+#The function below is required for extracting the boundaries if the confidence interval for lambda (so it can be plotted with its error bars)
+#for separating the boundaries of the confidence interval of parameters (lambda) into two numeric objects instead of a single object
+divide_ci <- function(ci.val) { #requires input of class 'list' of confidence intervals separated by ' ' (space), since that is how the pgls model object stores that info
+  bounds.long <- stringr::str_split_fixed(ci.val, ' ', 2) #classed as array hence maybe why subsetting without column works later
+  bounds.split <- data.frame('lower_CI' = rep(NA, 10), 'upper_CI' = rep(NA, 10))
+  for (i in 1:10) {
+    bounds.split[i, c('lower_CI')] <- as.numeric(bounds.long[2*i - 1]) #subsetting arrays allows this to mean only the first column if no column is specified
+    bounds.split[i, c('upper_CI')] <- as.numeric(bounds.long[2*i])
+  }
+  return(bounds.split)
+}
+
+#the following is for extracting the calculated r-squared value from a pgls regression model, especially useful when list-applied to many models simultaneously
+r_squared <- function(model) {
+  x <- summary(model)
+  x$r.squared
+}
+
+#the following allows extraction of the slope coefficient of a pgls regression model, especially useful when list-applied to a large number of models simlutaneously
+extract_slope <- function(model) {
+  x <- summary(model)
+  x$coefficients[2,1]
+}
+
+extract_SE <- function(model) { 
+  #this extract the standard error of the slope coefficient for a single independent variable (or maybe the first one mentioned if there are more than one but it is untested)
+  x <- summary(model)
+  s.e.val <- x$coefficients[c(as.character(x$call$formula[[3]])),c('Std. Error')]
+  return(s.e.val)
+}
+
+
+#to extract the lambda values from models (for generating tables of lambda values from trait-correlation models fitted for pairs of variables)
+extract_lambda <- function(model){
+  x <- model
+  lambda <- x$param[2]
+  return(lambda)
+}
+
+extract_P <- function(model) {
+  #extracts the P-value for the slope coefficient of the independent variable in a bvariate correlation
+  x <- summary(model)
+  P <- x$coefficients[c(as.character(x$call$formula[[3]])), c('Pr(>|t|)')]
+  return(P)
+}
+
+extract_n <- function(model) {
+  x <- summary(model)
+  n <- x$df[[2]]
+  return(n)
+}
+```
+
+
+## Data Preparation
+
+```{r}
+trait.data.full <- combined_traits #this is the long-form row-bound pooled data from all datasets with the grampians SD data removed
+trait.medians <- trait_medians #this is the calculated medians from the eucdata package with the max height added from the EUCLID database and all 170 taxa with measured data and all traits for which there is any data even if only in a sigle dataset
+
+#to record what species there is data for in each dataset that was pooled
+taxa.grp <- unique(trait.data.full[trait.data.full$dataset == 'grampians', c('taxon')])
+taxa.mall <- unique(trait.data.full[trait.data.full$dataset == 'mallee', c('taxon')]) 
+taxa.se <- unique(trait.data.full[trait.data.full$dataset == 'southeast', c('taxon')])
+taxa.wa <- unique(trait.data.full[trait.data.full$dataset == 'stirling', c('taxon')])
+sum(length(taxa.grp), length(taxa.mall), length(taxa.se), length(taxa.wa)) #170 plus 11 duplicated
+taxa.in.2.datasets <- unlist(list(taxa.grp, taxa.mall, taxa.se, taxa.wa))[duplicated(unlist(list(taxa.grp, taxa.mall, taxa.se, taxa.wa)))]
+
+all.taxa <- data.frame('taxon' = unique(trait.data.full$taxon))
+
+datasets <- unique(trait.data.full[c('taxon', 'dataset')])
+datasets2 <- unique(trait.data.full[c('taxon', 'dataset')])[duplicated(unique(trait.data.full[c('taxon', 'dataset')])$taxon),]
+names(datasets2) <- c('taxon', 'dataset2')
+```
+
+
+Now to figure out which ones have an analogue on the euclid max heights dataset:
+```{r}
+euc.max.heights <- euclid
+name.test <- anti_join(all.taxa, euc.max.heights, by = 'taxon', copy = FALSE)
+name.test[name.test$taxon %in% taxa.wa,] #there are 9 wa taxa that have no direct match to max height from EUCLID
+name.test[name.test$taxon %in% taxa.se,] #tells me E. pauciflora ans Lophostemon confertus of the missing height taxa are in se
+name.test[name.test$taxon %in% taxa.grp,] #tells me (goniocalyx|viridissima) and (leucoxylon|pruinosa) are in the grampians dataset
+name.test[name.test$taxon %in% taxa.mall,] #tells me which problematic ones are in the mallee dataset incl. E. socialis subsp. (socialis|viridans) and Eucalyptus
+```
+The mallee ones are mostly not in the euclid list bc their status as a species is not well supported and they are controversial. The WA ones mostly need a subspecies specification to match, though E. decipiens has some taxonomic ambiguity. E. vergrandis does not exist as a taxon but E. vegrandis does so I can assume that's a typo.
+
+
+Ambiguously resolved taxa will be excluded from the phylogeny (those three for whom the subspecies could not be resolved, and the unspecified Eucalyptus from the mallee dataset) along with the unspecified subspecies of Eucalyptus pauciflora (since there are already samples from every other subspecies of it including the autonym). All but three remaining taxa in the dataset are not considered current according to APC (2021)
+
+Heights inferred are as follows (in the order that they appear in the name.test dataframe):
+
+E. costata subsp. murrayana: 8m (height of E. incrassata to which this taxon is now considered to belong)  
+E. silvestris: 7m (that of E. odorata to which this taxon now belongs)  
+E. wimmerensis: 8m (that of the taxa this species is poorly resolved from and for which height data is available) 
+E. vergrandis: 6m (that of both ssp. of E. vegrandis)  
+Lophostemon confertus: 40m according to Rob Kooyman
+E. preissiana: 2.5m (that of the subsp. preissiana since its distribution includes the collecting area).
+E. wandoo: 18m (that of ssp. wandoo based on distribution)  
+E. rudis: 20m (from ssp. rudis based on distribution)  
+E. flocktoniae: 8m (both sspp. same height but ssp. flocktoniae most likely collected based on distribution)  
+
+
+Other taxa that had been manually assign a max. height through less certain means and have now decided to just go with the median value for each 
+E. decipiens: 10m (according to current euclid website, accessed 31/08/2020)  
+E. pluricaulis (known on florabase as E. redunca subsp. pluricaulis and : 5m (height of taller ssp. since collecting area is in a lightly higher rainfall category (BOM data), since distributions of both subspecies pass closely to Stirling NP and can't be used to determine which subspecies was likely the one thta was collected)
+E. thamnoides: 4m (both ssp. have same max. height and have been sunk into the same taxon)  
+E. xanthonema: 4m (of taller ssp. since they have both been sunk into single taxon)  
+
+Note: all taxa (including the Syncarpia and Tristaniopsis species) are included in the EUCLID database except Lophostemon, whose height was inferred based on the 
+
+```{r}
+name.test #to remind us which taxa we will need to manually input heights to
+#heights2 <- data.frame("max_height_m" = c(8, 7, 8, 40, 2.5, 18, 10, 4, 4, 20, 6, 8, 5))
+
+taxa.for.height.assign <- c('Eucalyptus costata subsp. murrayana', 'Eucalyptus silvestris', 'Eucalyptus wimmerensis', 'Eucalyptus vergrandis', 'Lophostemon confertus', 'Eucalyptus preissiana', 'Eucalyptus wandoo', 'Eucalyptus flocktoniae')
+
+#sum(!taxa.for.height.assign %in% all.taxa$taxon)
+
+trait.medians[trait.medians$taxon %in% taxa.for.height.assign, c('taxon', 'max_height_m')]
+
+
+#adding max heights that were missing entirely from euclid heights
+trait.medians[trait.medians$taxon == 'Eucalyptus costata subsp. murrayana', c('max_height_m')] <- 8
+trait.medians[trait.medians$taxon == 'Eucalyptus silvestris', c('max_height_m')] <- 7
+trait.medians[trait.medians$taxon == 'Eucalyptus wimmerensis', c('max_height_m')] <- 8
+trait.medians[trait.medians$taxon == 'Eucalyptus vergrandis', c('max_height_m')] <- 6
+trait.medians[trait.medians$taxon == 'Lophostemon confertus', c('max_height_m')] <- 40
+
+#now add max heights for taxa we can resonably be sure which subspecies was collected based on different subspecies having different distribution, and so we don't want to just leave those as the calculated median max. height for all subspecies
+trait.medians[trait.medians$taxon == 'Eucalyptus preissiana', c('max_height_m')] <- 2.5
+trait.medians[trait.medians$taxon == 'Eucalyptus wandoo', c('max_height_m')] <- 18
+trait.medians[trait.medians$taxon == 'Eucalyptus rudis', c('max_height_m')] <- 20
+trait.medians[trait.medians$taxon == 'Eucalyptus flocktoniae', c('max_height_m')] <- 8
+
+```
+
+Now to get rid of taxa that are being excluded because their taxonomic resolution is strange and we won't know where to place them on the tree.
+
+```{r}
+all.taxa.clean <- all.taxa[!grepl(".)", all.taxa$taxon),] #gets rid of the three with the "pipe" symbol for now
+all.taxa.clean <- all.taxa.clean[!all.taxa.clean == "Eucalyptus" & !all.taxa.clean == "Eucalyptus pauciflora"] #gets rid of unspecified taxa
+all.taxa.clean <- data.frame('taxon' = all.taxa.clean)
+
+trait.medians <- trait.medians[trait.medians$taxon %in% all.taxa.clean$taxon,] #new medians with 3 pipe-symbol taxa, Eucalyptus, and E. pauciflora removed s now there's 165 taxa
+```
+
+
+The mallee dataset was most limiting and only has data for: SLA, leaf area, leaf mass, fruit mass, seed mass. The remaining datasets include fruit wall thickness and only the southeast and stirling datasets include stem density, relative height by girth and relative bark thickness by girth. While only the mallee traits will be measured for almost all taxa, the remaining aforementioned traits cover enough different aspects of functional dimensions and are measured in enough taxa to be able to feasibly draw conclusions.
+
+
+```{r}
+trait.medians <- trait.medians[c('taxon', 'max_height_m', 'allometric_height_girth',  'stem_density_g_per_ml', 'allometric_bark_girth', 'sla_mm2_per_mg', 'leaf_area_cm2', 'leaf_mass_g', 'fruit_wall_width_mm', 'fruit_mass_mg', 'seed_mass_mg')]
+names(trait.medians)[names(trait.medians) == 'allometric_height_girth'] <- 'relative_height_by_girth'
+names(trait.medians)[names(trait.medians) == 'allometric_bark_girth'] <- 'relative_bt_by_girth'
+```
+
+
+```{r}
+eucs.data.prel <- trait.medians
+eucs.data.prel <- left_join(eucs.data.prel, datasets[!duplicated(datasets$taxon),])
+eucs.data.prel <- left_join(eucs.data.prel, datasets2)
+
+eucs.data.prel <- eucs.data.prel[c("taxon", "dataset", "dataset2", "max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_wall_width_mm", "fruit_mass_mg", "seed_mass_mg")]
+```
+
+
+
+### Adding Fire-Response Traits
+
+Only a single taxon included in the phylogeny is a stem sprouter (Eucalyptus sieberi), the fire responses exhibited by the remaining taxa are either obligate seeding, resprouting from a lignotuber, or capable of resprouting from both a lignotuber and epicormic buds in the stems (combination sprouters).
+
+```{r fig8, fig.height = 25, fig.width = 10}
+#write.csv(names.all.taxa, "names_all_taxa.csv", row.names = FALSE)
+fire.data <- read_excel("Input_data/fire_data.xlsx", sheet = "fire.response")
+fire.data <- data.frame(fire.data[!is.na(fire.data$taxon), c("taxon", "Sprouter", "Type")]) #removed NA rows and selected the columns that contain the data itself
+fire.data[fire.data == "NA"] <- NA
+fire.data[fire.data == "S"] <- 1 #assigning all the resprouters to the dummy variable 1
+fire.data[fire.data == "O"] <- 0 #assigning obligate seeders to 0
+sprouting.broad <- data.frame(fire.data[c("taxon", "Sprouter")]) #just the sprouter variable
+
+#now to add the first part to traits data frame
+#eucs.data.3loc <- left_join(eucs.data.3loc, fire.data1)
+
+#now to add and code the fire data by whether or not they can sprout from either the lignotuber or stem
+
+sprouting.detailed <- data.frame("taxon" = fire.data$taxon, "Stem_Sprouter" = fire.data$Type)
+sprouting.detailed[sprouting.detailed == 'C'] <- 1 #combination sprouters are also stem sprouters
+sprouting.detailed[sprouting.detailed == 'Var.'] <- 1 #deciding to code variable species as capable of stem sprouting sometimes so being included in that category
+sprouting.detailed[sprouting.detailed == 'Var'] <- 1 #to include the rthographic variation there
+sprouting.detailed[sprouting.detailed == 'St'] <- 1
+sprouting.detailed[sprouting.detailed == 'L'] <- 0
+
+ligno.col <- data.frame("Lignotuber_Sprouter" = fire.data$Type)
+ligno.col[ligno.col == 'L'] <- 1
+ligno.col[ligno.col == 'C'] <- 1 #true in almost all cases, only E. sieberi is a stem-only sprouter
+ligno.col[ligno.col == 'St'] <- 0
+ligno.col[ligno.col == 'Var'] <- 1
+ligno.col[ligno.col == 'Var.'] <- 1
+
+sum(!ligno.col$Lignotuber_Sprouter == fire.data$Sprouter, na.rm = TRUE) #the only difference is the one taxon that is a stem sprouter
+
+sprouting.detailed <- cbind(sprouting.detailed, ligno.col)
+
+eucs.fire.data <- left_join(sprouting.broad, sprouting.detailed)
+
+eucs.data.prel <- left_join(eucs.data.prel, eucs.fire.data) #for future use and completeness since not every analysis requires scaled data
+
+#Now to include the case where the 10 variably-stem-sprouting taxa are NOT considered as Stem sprouters:
+sprouting.detailed2 <- data.frame("taxon" = fire.data$taxon, "Stem_Sprouter" = fire.data$Type)
+sprouting.detailed2[sprouting.detailed2 == 'C'] <- 1 #combination sprouters are also stem sprouters
+sprouting.detailed2[sprouting.detailed2 == 'Var.'] <- 0 #deciding to code variable species as incapable of stem sprouting sometimes so being excluded from that category
+sprouting.detailed2[sprouting.detailed2 == 'Var'] <- 0 #to include the orthographic variation there
+sprouting.detailed2[sprouting.detailed2 == 'St'] <- 1
+sprouting.detailed2[sprouting.detailed2 == 'L'] <- 0
+
+names(sprouting.detailed2)[names(sprouting.detailed2) == 'Stem_Sprouter'] <- 'Stem_Sprouter2'
+
+eucs.fire.data <- left_join(eucs.fire.data, sprouting.detailed2)
+
+eucs.data.prel <- left_join(eucs.data.prel, sprouting.detailed2)
+
+#now for alternate ways of dummy coding if we want to have each sprouting category be a single coefficient for each category (or a categorical factor later)
+ligno.only <- data.frame('Lignotuber_Only' = eucs.data.prel$Lignotuber_Sprouter)
+is.combo.sprouter <- eucs.data.prel$Stem_Sprouter == 1 #this will allow us to select the rows of lignotuber_sprouter that correspond to combinations sprouters
+is.combo.sprouter[is.na(is.combo.sprouter)] <- FALSE
+ligno.only[is.combo.sprouter,] <- 0
+eucs.data.prel <- cbind(eucs.data.prel, ligno.only)
+
+cat.sprout <- data.frame('Sprouting_Type' = rep(NA, length(eucs.data.prel$taxon)))
+eucs.data.prel <- cbind(eucs.data.prel, cat.sprout)
+eucs.data.prel$Sprouting_Type[ligno.only == 1] <- 'Lignotuber_Only'
+eucs.data.prel$Sprouting_Type[eucs.data.prel$Sprouter == 0] <- 'Obligate_Seeder'
+eucs.data.prel$Sprouting_Type[eucs.data.prel$Stem_Sprouter == 1] <- 'Combination_Sprouter'
+eucs.data.prel$Sprouting_Type <- as.factor(eucs.data.prel$Sprouting_Type)
+#sum(ligno.only == 1, na.rm = TRUE) #39 btw
+
+#for the alternate designation of 10 variable taxa as lignotuber-only repsrouters still using the same 3-level categorical variable method
+eucs.data.prel <- cbind(eucs.data.prel, data.frame('Sprouting_Type2' = as.character(eucs.data.prel$Sprouting_Type)))
+eucs.data.prel$Sprouting_Type2[eucs.data.prel$Sprouter == 1 & eucs.data.prel$Stem_Sprouter2 == 0 & !is.na(eucs.data.prel$Stem_Sprouter2) & eucs.data.prel$Sprouting_Type2 == 'Combination_Sprouter'] <- 'Lignotuber_Only'
+eucs.data.prel$Sprouting_Type2 <- as.factor(eucs.data.prel$Sprouting_Type2)
+
+
+# Also we might want to determine where E. sieberi (the only stem-only resprouter in our data set) is in the datacloud by creating another column (just 1 and 0 should suffice for just looking at it)
+sieberi <- data.frame('Sieberi' = rep(NA, length(eucs.data.prel$taxon)))
+eucs.data.prel <- cbind(eucs.data.prel, sieberi)
+eucs.data.prel$Sieberi[eucs.data.prel$taxon == 'Eucalyptus sieberi'] <- 'Y'
+eucs.data.prel$Sieberi[!eucs.data.prel$taxon == 'Eucalyptus sieberi'] <- 'N'
+```
+
+### Final Datasets
+
+```{r}
+eucs.data.165 <- data.frame(eucs.data.prel) # this pgls method being used in this analysis requires a taxon column rather than rownames
+cat.cols <- c("taxon", "dataset", "dataset2", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sieberi")
+eucs.log.data.165 <- eucs.data.165
+eucs.log.data.165[, !names(eucs.log.data.165) %in% cat.cols] <- lapply(eucs.log.data.165[, !names(eucs.log.data.165) %in% cat.cols], log10)
+eucs.scaled.data.165 <- eucs.log.data.165
+eucs.scaled.data.165[, !names(eucs.scaled.data.165) %in% cat.cols] <- lapply(eucs.scaled.data.165[, !names(eucs.log.data.165) %in% cat.cols], scale)
+
+eucs.data <- data.frame(eucs.data.prel) # this pgls method being used in this analysis requires a taxon column rather than rownames
+eucs.data <- eucs.data[!eucs.data$taxon %in% c('Tristaniopsis laurina', 'Eucalyptus bunyip', 'Eucalyptus carolaniae', 'Eucalyptus robusta', 'Eucalyptus dendromorpha'),]
+cat.cols <- c("taxon", "dataset", "dataset2", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sieberi")
+eucs.log.data <- eucs.data
+eucs.log.data[, !names(eucs.log.data) %in% cat.cols] <- lapply(eucs.log.data[, !names(eucs.log.data) %in% cat.cols], log10)
+eucs.scaled.data <- eucs.log.data
+eucs.scaled.data[, !names(eucs.scaled.data) %in% cat.cols] <- lapply(eucs.scaled.data[, !names(eucs.log.data) %in% cat.cols], scale)
+
+# #temporary effect to be decided
+# eucs.scaled.data.165 <- eucs.scaled.data #to keep copy of the 165-taxon dataset including some taxa that aren't on the tree but we have ample data for them i.e. keep the extra 5 taxa
+# eucs.scaled.data <- eucs.scaled.data.165[eucs.scaled.data.165$taxon %in% tree$tip.label,]
+# sort(tree$tip.label)
+
+#for the instances where I want to compare the effect of stem sprouting on correlations without the potentially significant (though small due to only being 5 taxa) effect on the correlation
+
+is.sprouter <- eucs.data$Sprouter
+is.sprouter <- is.sprouter == 1 #creates logical vector that is TRUE when the value is 1
+is.sprouter[is.na(is.sprouter)] <- FALSE
+#all rows with missinf sprouting data also have missing stem sprouting data so don't have to worry about long info for later correlations
+eucs.data.sprouters <- eucs.data[is.sprouter, ]
+
+is.seeder <- eucs.data$Sprouter
+is.seeder <- is.seeder == 0
+is.seeder[is.na(is.seeder)] <- FALSE
+eucs.data.seeders <- eucs.data[is.seeder,]
+eucs.scaled.data.seed <- eucs.scaled.data[is.seeder,]
+```
+
+
+# Sampling Map
+
+```{r}
+ggplot(ozmap_states) + geom_sf() + coord_sf(xlim = c(110, 155), ylim = c(-45,-10)) + geom_point(
+    aes(longitude_gda94, latitude_gda94, col = altitude_m),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.5, alpha = 0.5
+  ) +
+  scale_color_viridis(option = 'plasma') +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+# zoom in on SE Australia
+ggplot(ozmap_states) + geom_sf() + coord_sf(xlim = c(140, 155), ylim = c(-40,-30)) + geom_point(
+    aes(longitude_gda94, latitude_gda94, col = altitude_m),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.75, alpha = 0.1
+  ) + scale_color_viridis(option = 'plasma') +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+# zoom in on Stirling samples
+ggplot(ozmap_states) + geom_sf() + coord_sf(xlim = c(117, 120), ylim = c(-35,-33)) + geom_point(
+    aes(longitude_gda94, latitude_gda94, col = 'red'),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 2, alpha = 0.1, color = 'coral', pch =17) +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+#plain black with axes
+ggplot() + theme_classic() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude_gda94, latitude_gda94),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.9, alpha = 0.5, color = 'black', pch = 17) +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+# plainest black
+ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude_gda94, latitude_gda94),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.9, alpha = 0.5, color = 'black', pch = 17) +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+pdf('Output_figures/map_of_collecting_locations.pdf')
+ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude_gda94, latitude_gda94),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 2, alpha = 0.5, color = 'black', pch = 17)
+dev.off()
+```
+

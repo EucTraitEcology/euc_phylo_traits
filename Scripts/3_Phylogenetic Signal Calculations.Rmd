@@ -1,0 +1,142 @@
+---
+title: "Lambda Calculations"
+output: html_notebook
+---
+
+# Introduction
+
+This Notebook serves to prepare each candidate tree and run and visualise the output of the analysis so that differences in those outputs can be compared.
+
+The pgls function in the package caper was used to run the statistical analysis.
+
+# Analysis
+
+## Data Preparation
+
+```{r fig.height = 30, fig.width = 15}
+#Each subsequent candidate input tree will be named eucs.test.tree
+  #each tree is known to be rooted
+tree <- read.tree("Input_data/final_tree.txt")
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+#plot_dim1(eucs.test.tree)
+
+#Preparing the matching objects that allow the package to link data frames to tree tips
+
+##for the untransformed data
+eucs.test <- eucs.test <- comparative.data(phy = eucs.test.tree, data = eucs.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.test$dropped$unmatched.rows # the only unmatched taxa are: bunyip and carolaniae, dendromorpha and robusta, Tristaniopsis
+eucs.test$dropped$tips #none as no tips on the tree are redundant
+
+##for the log-transformed data
+eucs.log.obj <- eucs.log.obj <- comparative.data(phy = eucs.test.tree, data = eucs.log.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.log.obj$dropped$unmatched.rows 
+
+##for the scaled data
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.scaled.obj$dropped$unmatched.rows
+
+# for comparing among sprouters only without obligate seeders
+eucs.sprout.obj <- comparative.data(phy = eucs.test.tree, data = eucs.data.sprouters, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.sprout.obj$dropped$unmatched.rows #now only bunyip and carolaniae, since others are NA for the sprouter category
+eucs.sprout.obj$dropped$tips #12 tips of non- or not-sure-if- sprouters that come from the 10 NA plus 5 obs minus the three NA not on the tree at all.
+
+#will leave the stem-only sprouter in there bc stem sprouting will be useful later.
+
+#to use that data in its scaled form need to subset the scaled data table as well
+eucs.scaled.sprouters <- eucs.scaled.data[is.sprouter, ] #the scaled values remain on the axis where the average includes the obseeders as well because we're ideally trying to place these taxa on some universal position on the spectrum of all taxa we have (as perhaps a proxy for all taxa in existence)
+eucs.scaled.sprout.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.sprouters, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.sprout.obj$dropped$tips #similar 12 species dropped
+#eucs.sprout.obj$dropped$tips == eucs.sprout.obj$dropped$tips #all good same 
+```
+
+## Phylogenetic Signal using Pagel's lambda
+
+Now to first compute lambda for each trait before testing correlations.
+
+```{r}
+lambda.mh <- pgls(max_height_m ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.mh)
+```
+
+The intercept for the scaled data is not meant to be significantly different from zero bc scaled data by definition has a mean of 0 anyway.
+
+```{r}
+lambda.rh <- pgls(relative_height_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rh)
+```
+
+
+```{r}
+lambda.std <- pgls(stem_density_g_per_ml ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.std)
+```
+
+
+```{r}
+lambda.rbt <- pgls(relative_bt_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rbt)
+```
+
+
+```{r}
+lambda.sla <- pgls(sla_mm2_per_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sla)
+```
+
+
+```{r}
+lambda.lfa <- pgls(leaf_area_cm2 ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.lfa)
+```
+
+
+```{r}
+lambda.lms <- pgls(leaf_mass_g ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.lms)
+```
+
+
+```{r}
+lambda.fms <- pgls(fruit_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fms)
+```
+
+
+```{r}
+lambda.fwl <- pgls(fruit_wall_width_mm ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fwl)
+```
+
+
+```{r}
+lambda.sms <- pgls(seed_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sms)
+```
+
+
+
+# Dot-Plot of Lambda values
+
+```{r}
+#First to creat a dataframe of lambda values of each model corresponding to each trait
+lambda.full <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh$param.CI$lambda$opt, lambda.rh$param.CI$lambda$opt, lambda.std$param.CI$lambda$opt, lambda.rbt$param.CI$lambda$opt, lambda.sla$param.CI$lambda$opt, lambda.lfa$param.CI$lambda$opt, lambda.lms$param.CI$lambda$opt, lambda.fms$param.CI$lambda$opt, lambda.fwl$param.CI$lambda$opt, lambda.sms$param.CI$lambda$opt))
+
+ci.val <- c(lambda.mh$param.CI$lambda$ci.val, lambda.rh$param.CI$lambda$ci.val, lambda.std$param.CI$lambda$ci.val, lambda.rbt$param.CI$lambda$ci.val, lambda.sla$param.CI$lambda$ci.val, lambda.lfa$param.CI$lambda$ci.val, lambda.lms$param.CI$lambda$ci.val, lambda.fms$param.CI$lambda$ci.val, lambda.fwl$param.CI$lambda$ci.val, lambda.sms$param.CI$lambda$ci.val)
+
+bounds <- divide_ci(ci.val)
+
+lambda.full <- cbind(lambda.full, bounds)
+dot.plot.data <- lambda.full[order(lambda.full$Lambda),]
+dot.plot.data[dot.plot.data$Traits == "Relative Height", c("lower_CI")] <- 0 #since the likely reason for the NA is that it's on significance would take the lower bound below 0, which is technically the lowest value this parameter can take (or is tested for by this function)
+
+lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20)) +labs(y= "Pagels Lambda")+ coord_flip() #don't need to specify which dataframe the lower_CI and upper_CI come from for errorbars because it default assumes it is the same dataframe used earlier to make the plot
+
+plot(lambda.dot.plot)
+ggsave(lambda.dot.plot, file = "Output_figures/lambda_values_dotplot.pdf", width = 15, height = 12)
+```
+
+All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in the traits but that one. Leaf mass had a sig-diff from zero value but it was very low.
+
+Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon. Perhaps analysis of variance might help with figuring this out??
