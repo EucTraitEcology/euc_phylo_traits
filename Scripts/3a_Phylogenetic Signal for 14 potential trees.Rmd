@@ -1,0 +1,881 @@
+---
+title: "Lambda Calculations of Phylogenetic Signal"
+output: html_notebook
+---
+
+# Introduction
+
+This Notebook serves to prepare each candidate tree and run and visualise the output of the phylogenetic signal analysis so that differences in those outputs can be compared. Upon selection of a final tree to be used in the main and subsequent analyses, this notebook calculates and visualises the output for the phylogenetic analysis for that tree.
+
+The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
+
+# Analysis
+
+## Required Packages, Functions, and Data
+
+
+```{r}
+# packages
+
+library(ape)
+library(ggtree)
+library(caper)
+library(ggplot2)
+library(dplyr)
+
+# functions
+
+## shortcut fot plotting trees (of the relevant size for this analysis) with the right dimensions to be easily inspected in the output within the this markdown document
+plot_dim1 <- function(phy) {
+  # plots with the correct size text and alignment for 158-225 taxa trees like will be used
+  plot(ggtree(phy) +xlim(0, 35) + geom_tiplab(size=5)) 
+}
+
+
+# The function below is required for extracting the boundaries of the confidence interval for lambda (so it can be plotted with its error bars) and separates the boundaries of the confidence interval of parameters (lambda) into two numeric objects instead of a single object
+
+divide_ci <- function(ci.val) { 
+  ## requires input of class 'list' of confidence intervals separated by ' ' (space), since that is how the pgls model object stores that info
+  ## classed as array
+  bounds.long <- stringr::str_split_fixed(ci.val, ' ', 2) 
+  ## creating an empty data frame to then populate with values in the next step
+  bounds.split <- data.frame('lower_CI' = rep(NA, 10), 'upper_CI' = rep(NA, 10))
+  for (i in 1:10) {
+    ## subsetting arrays (rather than data frames /lists allows the following to mean only the first column if no column is specified
+    bounds.split[i, c('lower_CI')] <- as.numeric(bounds.long[2*i - 1]) 
+    bounds.split[i, c('upper_CI')] <- as.numeric(bounds.long[2*i])
+  }
+  return(bounds.split)
+}
+
+# data
+eucs.data <- read.csv("../Input_data/eucs_data.csv")
+eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+```
+
+
+## Data Preparation
+
+```{r fig.height = 30, fig.width = 15}
+# Each subsequent candidate input tree will be named eucs.test.tree, each tree is known to be rooted in advance
+## first to read in the list object of all the newick forms of the potential trees
+pot.tree.list <- readRDS("../Input_data/Potential_trees_nwk_list.RData")
+## picking which potential tree we're going to use for this run
+tree <- read.tree(text = pot.tree.list[[15]])
+## remove some erroneous node labels that cause issues later
+tree$node.label <- NULL
+## converts tip names back into space-separated rather than underscore (the default when reading from newick format)
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+## trees require branch length for analysis, this method generates it from topology-only trees allowing us to calculate genetic closeness beween taxa based on the number of nodes from the root they share instead of using the length of branches, which has been removed as part of the tree-building process anyway
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+plot_dim1(tree)
+
+
+# Preparing the matching objects that allow the package to link data frames to tree tips
+
+## for the untransformed data
+eucs.test <- comparative.data(phy = eucs.test.tree, data = eucs.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+### the only unmatched taxa dropped from the dataset due to having no match on the tree are: bunyip and carolaniae, dendromorpha and robusta, Tristaniopsis + a subset of chapmaniana, punctata, silvestris, strzleckii, behriana and wimmerensis
+eucs.test$dropped$unmatched.rows 
+# Should have no tips dropped as only taxa in the trait dataset should be on the tree
+eucs.test$dropped$tips 
+
+## for the log-transformed data
+eucs.log.obj <- eucs.log.obj <- comparative.data(phy = eucs.test.tree, data = eucs.log.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+### following should be same list as for untransformed data `eucs.test` above
+eucs.log.obj$dropped$unmatched.rows 
+
+## for the scaled data
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+### following should be same list as for untransformed data `eucs.test` above
+eucs.scaled.obj$dropped$unmatched.rows
+```
+
+
+## Phylogenetic Signal using Pagel's lambda
+
+Now to first compute lambda for each trait before testing correlations.
+
+```{r}
+lambda.mh <- pgls(max_height_m ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.mh)
+```
+
+The intercept for the scaled data is not meant to be significantly different from zero bc scaled data by definition has a mean of 0 anyway. However, the phylogenetic mean is not the same as the equally weighted mean across the data, and tends to represent what the trait value is estimated to be at the root node of the whole tree.
+
+```{r}
+lambda.rh <- pgls(relative_height_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rh)
+```
+
+
+```{r}
+lambda.std <- pgls(stem_density_g_per_ml ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.std)
+```
+
+
+```{r}
+lambda.rbt <- pgls(relative_bt_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rbt)
+```
+
+
+```{r}
+lambda.sla <- pgls(sla_mm2_per_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sla)
+```
+
+
+```{r}
+lambda.lfa <- pgls(leaf_area_cm2 ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.lfa)
+```
+
+
+```{r}
+lambda.lms <- pgls(leaf_mass_g ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.lms)
+```
+
+
+```{r}
+lambda.fms <- pgls(fruit_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fms)
+```
+
+
+```{r}
+lambda.fwl <- pgls(fruit_wall_width_mm ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fwl)
+```
+
+
+```{r}
+lambda.sms <- pgls(seed_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sms)
+```
+
+
+
+# Dot-Plot of Lambda values
+
+```{r}
+# First to creat a dataframe of lambda values of each model corresponding to each trait
+lambda.full <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh$param.CI$lambda$opt, lambda.rh$param.CI$lambda$opt, lambda.std$param.CI$lambda$opt, lambda.rbt$param.CI$lambda$opt, lambda.sla$param.CI$lambda$opt, lambda.lfa$param.CI$lambda$opt, lambda.lms$param.CI$lambda$opt, lambda.fms$param.CI$lambda$opt, lambda.fwl$param.CI$lambda$opt, lambda.sms$param.CI$lambda$opt))
+
+# extracts the two values for boundaries of the 95% confidence interval of lamba for each model
+ci.val <- c(lambda.mh$param.CI$lambda$ci.val, lambda.rh$param.CI$lambda$ci.val, lambda.std$param.CI$lambda$ci.val, lambda.rbt$param.CI$lambda$ci.val, lambda.sla$param.CI$lambda$ci.val, lambda.lfa$param.CI$lambda$ci.val, lambda.lms$param.CI$lambda$ci.val, lambda.fms$param.CI$lambda$ci.val, lambda.fwl$param.CI$lambda$ci.val, lambda.sms$param.CI$lambda$ci.val)
+
+# splits the CI bounds into two seperate objects, one for the lower and another for the upper bound
+bounds <- divide_ci(ci.val)
+
+# constructing the full dataframe of estimate and respective bounds
+lambda.full <- cbind(lambda.full, bounds)
+## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
+lambda.full[lambda.full$Traits == "Relative Height", c("lower_CI")] <- 0 
+## having an extra column to compare ranges
+lambda.full$range_CI <- lambda.full$upper_CI - lambda.full$lower_CI
+## for dot plot, need categorical traits to be in order from highest to lower lambda value
+dot.plot.data <- lambda.full[order(lambda.full$Lambda),]
+lambda.full.null <- lambda.full
+
+# now to plot the tree using the above ordered data frame
+lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + theme_classic() + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + 
+scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 30), axis.title.x = element_text(size = 30), axis.text.x = element_text(size = 30)) +labs(y= "Pagels Lambda", x="")+ coord_flip()
+
+# now to save each iteration to a seperate pdf
+ggsave(lambda.dot.plot, file = "../Output_figures/Potential_trees_and_results/lambda_values_dotplot_null.pdf", width = 15, height = 10)
+```
+
+All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass had a value significantly different from zero, but it was very low. The rest had moderate to high values of lambda.
+
+Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon. Perhaps analysis of variance might help with figuring this out??
+
+# Supp Mat. Comparison of Candidate Trees
+
+## Lambda Values
+
+Now to determine what the maximum range of lambda values are for each trait across all 15 potential trees and compare that to the size of the confidence interval for each trait's lambda value (both the CI of the single tree we will be using from later, as well as the one with the widest range among these 15).
+
+```{r}
+# data frame of lambda value estimated for each trait for each of the 15 trees
+compare.lambda.trees <- data.frame('Traits' = lambda.full.null$Traits, 'Lambda1' = lambda.full1$Lambda, 'Lambda2' = lambda.full2$Lambda, 'Lambda3' = lambda.full3$Lambda, 'Lambda4' = lambda.full4$Lambda, 'Lambda5' = lambda.full5$Lambda, 'Lambda6' = lambda.full6$Lambda, 'Lambda7' = lambda.full7$Lambda, 'Lambda8' = lambda.full8$Lambda, 'Lambda9' = lambda.full9$Lambda, 'Lambda10' = lambda.full10$Lambda, 'Lambda11' = lambda.full11$Lambda, 'Lambda12' = lambda.full12$Lambda, 'Lambda13' = lambda.full13$Lambda, 'Lambda14' = lambda.full14$Lambda, 'Lambda_null' = lambda.full.null$Lambda)
+
+# adding the column stating the range between the largest and smallest lambda values for a given trait
+compare.lambda.trees$range <- unlist(lapply(as.data.frame(t(as.matrix(compare.lambda.trees[,!names(compare.lambda.trees) %in% c('Traits')]))), function(lambdas_for_a_trait){
+  range <- range(lambdas_for_a_trait)[[2]] - range(lambdas_for_a_trait)[[1]]
+  return(range)
+}))
+
+
+# width of CI for each trait for each of the 15 trees
+compare.range.CI.trees <- data.frame('Traits' = lambda.full.null$Traits, 'rangeCI_1' = lambda.full1$range_CI, 'rangeCI_2' = lambda.full2$range_CI, 'rangeCI_3' = lambda.full3$range_CI, 'rangeCI_4' = lambda.full4$range_CI, 'rangeCI_5' = lambda.full5$range_CI, 'rangeCI_6' = lambda.full6$range_CI, 'rangeCI_7' = lambda.full7$range_CI, 'rangeCI_8' = lambda.full8$range_CI, 'rangeCI_9' = lambda.full9$range_CI, 'rangeCI_10' = lambda.full10$range_CI, 'rangeCI_11' = lambda.full11$range_CI, 'rangeCI_12' = lambda.full12$range_CI, 'rangeCI_13' = lambda.full13$range_CI, 'rangeCI_14' = lambda.full14$range_CI, 'rangeCI_null' = lambda.full.null$range_CI)
+
+# adding the smallest CI-range for each trait across all 15 trees to the first data frame to show it is always an order of magnitude greater than the variation in lambda point estmates from tree to tree
+compare.lambda.trees$min_CI_range <- unlist(lapply(as.data.frame(t(as.matrix(compare.range.CI.trees[,!names(compare.range.CI.trees) %in% c('Traits')]))), min))
+```
+
+It can clearly be seen that even for the tree with the smallest and narrowest CI for the lambda for each trait is an order of magnitude greater than the range of all point estimates of lambda across the 15 trees for a given trait. Once we have decided ont he final tree to be used, the CI bounds and CI range for that will also be added as a final 2 columns to confirm that all 15 trees' values do fall within our final CI as well.
+
+```{r}
+# Now to add a final column containing the value CI bounds and range for the final tree we will be using 
+final.tree.lambdas <- read.csv("../Output_figures/final_tree_lambdas.csv")
+final.tree.lambdas <- final.tree.lambdas[,names(final.tree.lambdas) %in% c('Traits', 'Lambda', 'lower_CI', 'upper_CI', 'range_CI')]
+
+final.lambda.comparisons <- left_join(compare.lambda.trees, final.tree.lambdas, by = 'Traits')
+```
+
+
+```{r}
+# now to export this whole table to csv to be read back into script 2
+write.csv(final.lambda.comparisons, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas.csv')
+```
+
+
+
+## Some Sensitive Correlations
+
+Since the lambda calcuated for a single trait in an intercept-only model is not necessarily correlated to the lambda value calculated in the residuals when that variable is orrelated with an explanatory variable, we sought to also test if there were significant differences between results of correlations that we know from preliminary analyses to be sensitive to losing statistical significance depending on whether phylogenetic relatedness of taxa are being accounted for. These relationships were SD-MH and SLA-LA.
+
+### SLA-LA Correlation
+
+SLA has the higher lambda in general than LA so for consistency with later data we'll use SLA as the dependent variable here. The following 15 code chunks refine the tree before rerunning the same model each time.
+
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[1]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel1 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel1)
+```
+
+```{r}
+# now we're using tree number 2 out of the 15
+tree <- read.tree(text = pot.tree.list[[2]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel2 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel2)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[3]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel3 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel3)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[4]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel4 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel4)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[5]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel5 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel5)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[6]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel6 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel6)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[7]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel7 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel7)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[8]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel8 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel8)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[9]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel9 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel9)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[10]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel10 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel10)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[11]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel11 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel11)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[12]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel12 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel12)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[13]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel13 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel13)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[14]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel14 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel14)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[15]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+sla.la.prel.null <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel.null)
+```
+
+All 15 trees produce the same non-significant relationship between SLA and LA and the lambda value was between 0.768-0.781 for all of them hence the range is 0.013 units of lambda.
+
+### MH-SD Correlation
+
+MH generally has the highest lambda of these two so for consistency we'll be using it as the dependent variable.
+
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[1]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel1 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel1)
+```
+
+```{r}
+# now we're using tree number 2 out of the 15
+tree <- read.tree(text = pot.tree.list[[2]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel2 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel2)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[3]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel3 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel3)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[4]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel4 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel4)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[5]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel5 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel5)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[6]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel6 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel6)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[7]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel7 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel7)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[8]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel8 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel8)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[9]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel9 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel9)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[10]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel10 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel10)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[11]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel11 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel11)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[12]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel12 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel12)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[13]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel13 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel13)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[14]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel14 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel14)
+```
+
+```{r}
+# Shortened redefinition of the tree being used in the initial data preparation section of this notebook
+tree <- read.tree(text = pot.tree.list[[15]])
+tree$node.label <- NULL
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+mh.sd.prel.null <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel.null)
+```
+
+Here we can similarly see that the lambda values vary little (0.790 - 0.803) across 15 different trees and the non-significance also does not change with the p-value hovering around 0.10-0.15.
+
+
+## Some extra tests of effect at deeper divergences
+
+(Don't need to publish this but good to know and check)
+Since we know that deep divergences are the ones that affect lambda a great deal, what if we were dealing with trees that had different or fewer outgroups (i.e. make 2 new trees without Syncarpia i.e, only Lophostemon as OG and then another using only Syncarpia as OG)
+
+### Lophostemon as OG
+
+```{r fig.width = 15, fig.height = 25}
+tree <- read.tree(file = '../Input_data/final_tree.txt')
+tree1 <- drop.tip(tree, "Syncarpia_glomulifera_subsp._glomulifera")
+plot_dim1(tree1)
+tree1$node.label <- NULL
+tree1$tip.label <- gsub("_", " ", tree1$tip.label)
+tree1 <- compute.brlen(tree1, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = tree1, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+```
+
+
+```{r}
+lambda.mh.e1 <- pgls(max_height_m ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.mh.e1)
+```
+
+
+```{r}
+lambda.rh.e1 <- pgls(relative_height_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rh.e1)
+```
+
+
+```{r}
+lambda.std.e1 <- pgls(stem_density_g_per_ml ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.std.e1)
+```
+
+
+```{r}
+lambda.rbt.e1 <- pgls(relative_bt_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rbt.e1)
+```
+
+
+```{r}
+lambda.sla.e1 <- pgls(sla_mm2_per_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sla.e1)
+```
+
+
+```{r}
+lambda.lfa.e1 <- pgls(leaf_area_cm2 ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.lfa.e1)
+```
+
+
+```{r}
+lambda.lms.e1 <- pgls(leaf_mass_g ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.lms.e1)
+```
+
+
+```{r}
+lambda.fms.e1 <- pgls(fruit_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fms.e1)
+```
+
+
+```{r}
+lambda.fwl.e1 <- pgls(fruit_wall_width_mm ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fwl.e1)
+```
+
+
+```{r}
+lambda.sms.e1 <- pgls(seed_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sms.e1)
+```
+
+
+```{r}
+# now to recreate the table of lambda values
+lambda.full.extra1 <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh.e1$param.CI$lambda$opt, lambda.rh.e1$param.CI$lambda$opt, lambda.std.e1$param.CI$lambda$opt, lambda.rbt.e1$param.CI$lambda$opt, lambda.sla.e1$param.CI$lambda$opt, lambda.lfa.e1$param.CI$lambda$opt, lambda.lms.e1$param.CI$lambda$opt, lambda.fms.e1$param.CI$lambda$opt, lambda.fwl.e1$param.CI$lambda$opt, lambda.sms.e1$param.CI$lambda$opt))
+
+# extracts the two values for boundaries of the 95% confidence interval of lamba for each model
+ci.val <- c(lambda.mh.e1$param.CI$lambda$ci.val, lambda.rh.e1$param.CI$lambda$ci.val, lambda.std.e1$param.CI$lambda$ci.val, lambda.rbt.e1$param.CI$lambda$ci.val, lambda.sla.e1$param.CI$lambda$ci.val, lambda.lfa.e1$param.CI$lambda$ci.val, lambda.lms.e1$param.CI$lambda$ci.val, lambda.fms.e1$param.CI$lambda$ci.val, lambda.fwl.e1$param.CI$lambda$ci.val, lambda.sms.e1$param.CI$lambda$ci.val)
+
+# splits the CI bounds into two seperate objects, one for the lower and another for the upper bound
+bounds <- divide_ci(ci.val)
+
+# constructing the full dataframe of estimate and respective bounds
+lambda.full.extra <- cbind(lambda.full.extra1, bounds)
+## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
+lambda.full.extra[lambda.full.extra$Traits == "Relative Height", c("lower_CI")] <- 0 
+## having an extra column to compare ranges
+lambda.full.extra$range_CI <- lambda.full.extra$upper_CI - lambda.full.extra$lower_CI
+```
+
+
+Now for the other tree without both outgroups.
+
+
+### Syncarpia as OG
+
+
+```{r fig.width = 15, fig.height = 25}
+tree2 <- tree1
+tree2$tip.label[tree2$tip.label == "Lophostemon confertus"] <- "Syncarpia glomulifera subsp. glomulifera"
+plot_dim1(tree2)
+tree2$node.label <- NULL
+tree2$tip.label <- gsub("_", " ", tree2$tip.label)
+tree2 <- compute.brlen(tree2, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = tree2, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+```
+
+
+```{r}
+lambda.mh.e2 <- pgls(max_height_m ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.mh.e2)
+```
+
+
+```{r}
+lambda.rh.e2 <- pgls(relative_height_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rh.e2)
+```
+
+
+```{r}
+lambda.std.e2 <- pgls(stem_density_g_per_ml ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.std.e2)
+```
+
+
+```{r}
+lambda.rbt.e2 <- pgls(relative_bt_by_girth ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.rbt.e2)
+```
+
+
+```{r}
+lambda.sla.e2 <- pgls(sla_mm2_per_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sla.e2)
+```
+
+
+```{r}
+lambda.lfa.e2 <- pgls(leaf_area_cm2 ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.lfa.e2)
+```
+
+
+```{r}
+lambda.lms.e2 <- pgls(leaf_mass_g ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.lms.e2)
+```
+
+
+```{r}
+lambda.fms.e2 <- pgls(fruit_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fms.e2)
+```
+
+
+```{r}
+lambda.fwl.e2 <- pgls(fruit_wall_width_mm ~ 1, data = eucs.scaled.obj, lambda = 'ML')
+summary(lambda.fwl.e2)
+```
+
+
+```{r}
+lambda.sms.e2 <- pgls(seed_mass_mg ~ 1, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(lambda.sms.e2)
+```
+
+```{r}
+# now to recreate the table of lambda values
+lambda.full.extra2 <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh.e2$param.CI$lambda$opt, lambda.rh.e2$param.CI$lambda$opt, lambda.std.e2$param.CI$lambda$opt, lambda.rbt.e2$param.CI$lambda$opt, lambda.sla.e2$param.CI$lambda$opt, lambda.lfa.e2$param.CI$lambda$opt, lambda.lms.e2$param.CI$lambda$opt, lambda.fms.e2$param.CI$lambda$opt, lambda.fwl.e2$param.CI$lambda$opt, lambda.sms.e2$param.CI$lambda$opt))
+
+# extracts the two values for boundaries of the 95% confidence interval of lamba for each model
+ci.val <- c(lambda.mh.e2$param.CI$lambda$ci.val, lambda.rh.e2$param.CI$lambda$ci.val, lambda.std.e2$param.CI$lambda$ci.val, lambda.rbt.e2$param.CI$lambda$ci.val, lambda.sla.e2$param.CI$lambda$ci.val, lambda.lfa.e2$param.CI$lambda$ci.val, lambda.lms.e2$param.CI$lambda$ci.val, lambda.fms.e2$param.CI$lambda$ci.val, lambda.fwl.e2$param.CI$lambda$ci.val, lambda.sms.e2$param.CI$lambda$ci.val)
+
+# splits the CI bounds into two seperate objects, one for the lower and another for the upper bound
+bounds <- divide_ci(ci.val)
+
+# constructing the full dataframe of estimate and respective bounds
+lambda.full.extra2 <- cbind(lambda.full.extra2, bounds)
+## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
+lambda.full.extra2[lambda.full.extra2$Traits == "Relative Height", c("lower_CI")] <- 0 
+## having an extra column to compare ranges
+lambda.full.extra2$range_CI <- lambda.full.extra2$upper_CI - lambda.full.extra2$lower_CI
+```
+
+### Adding both trees to table
+
+```{r}
+# first to remove the summary columns at the end as we'll have to recalculate them after we add two columns
+compare.lambda.trees2 <- compare.lambda.trees[, !names(compare.lambda.trees) %in% c("range", "min_CI_range")]
+
+# now to make the two column for these two extra trees to be added to the end of existing table
+extra.trees.lambda <- data.frame('Lambda_OG1' = lambda.full.extra$Lambda, 'Lambda_OG2' = lambda.full.extra2$Lambda)
+
+compare.lambda.trees2 <- cbind(compare.lambda.trees2, extra.trees.lambda)
+
+# now to recalculate the max range 
+compare.lambda.trees2$range <- unlist(lapply(as.data.frame(t(as.matrix(compare.lambda.trees2[,!names(compare.lambda.trees2) %in% c('Traits')]))), function(lambdas_for_a_trait){
+  range <- range(lambdas_for_a_trait)[[2]] - range(lambdas_for_a_trait)[[1]]
+  return(range)
+}))
+
+# now to construct two culumn with the CI ranged for each tree
+extra.trees.CI.ranges <- data.frame("range_CI_OG1" = lambda.full.extra$range_CI, "range_CI_OG2" = lambda.full.extra2$range_CI)
+
+# adding these column to the compare.range.CI.trees
+compare.range.CI.trees2 <- cbind(compare.range.CI.trees, extra.trees.CI.ranges)
+
+# now to add the minimum of this across all trees to the compare.lambda.trees2 table
+compare.lambda.trees2$min_CI_range <- unlist(lapply(as.data.frame(t(as.matrix(compare.range.CI.trees2[,!names(compare.range.CI.trees2) %in% c('Traits')]))), min))
+```
+
+
+```{r}
+# Now to add the final columns containing the values, CI bounds, and ranges for the final tree we will be using 
+final.tree.lambdas <- read.csv("../Output_figures/final_tree_lambdas.csv")
+final.tree.lambdas <- final.tree.lambdas[,names(final.tree.lambdas) %in% c('Traits', 'Lambda', 'lower_CI', 'upper_CI', 'range_CI')]
+
+final.lambda.comparisons2 <- left_join(compare.lambda.trees2, final.tree.lambdas, by = 'Traits')
+```
+
+
+```{r}
+# now to export this whole table to csv to be read back into script 2
+write.csv(final.lambda.comparisons2, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2.csv')
+```
+
+We can see that the 
