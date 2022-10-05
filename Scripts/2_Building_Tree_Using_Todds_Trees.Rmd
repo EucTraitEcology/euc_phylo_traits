@@ -5,58 +5,180 @@ output: html_notebook
 
 ## Introduction
 
-The following notebook uses Andrew Thronhill's (Thornhill et al. 2019) tree of ~675 Eucalypt taxa and Bayly et al.'s (2013) tree to make a combined supertree of as many taxa in our dataset as are included and then place the remaining trait-taxa to complete the tree we will use for any subsequent PGLS analysis and measurement of phylogenetic signal.
+The following notebook uses Andrew Thronhill's (Thornhill et al. 2019) tree of ~675 Eucalypt taxa and Bayly et al.'s (2013) tree to make a combined supertree of as many taxa in our dataset as are included on them. Remaining taxa for which we have trait data will be placed on this tree using other smaller phylogenies and taxonomic information to complete the tree for any subsequent PGLS analysis and measurement of phylogenetic signal.
+
+
+## Required Packages and Data
+
+```{r}
+# # To install ggtree package
+remotes::install_github("YuLab-SMU/ggtree") #let's see if this works?
+
+library(ape)
+library(BiocManager) # for installing ggtree but doesn't need to be loaded after that or even installed to  begin with if an alternate route of installing of ggtree
+library(ggtree) # for more aesthetic visualisations of trees
+library(stringr)
+library(phangorn) # contains the superTree() function used to combine various phylogenies to create the tree used in this analysis
+library(caper)
+library(viridis)
+
+all.taxa.clean <- read.csv('../Input_data/all.taxa.clean.csv')
+all.taxa.clean <- all.taxa.clean[c('taxon')]
+
+# for now until the package starts working again:
+combined_traits <- read.csv('../Input_data/combined_traits.csv')
+```
+
+### Required Functions
+
+```{r}
+# shortcut fot plotting trees (of the relevant size for this analysis) with the right dimensions to be easily inspected in the output within the this markdown document
+plot_dim1 <- function(phy) {
+  # plots with the correct size text and alignment for 158-225 taxa trees like will be used
+  plot(ggtree(phy) +xlim(0, 35) + geom_tiplab(size=5)) 
+}
+
+#the following function allows objects that are themselves comprised of a list of several objects to be repeated and each repeat be a single element of the list instead of contributing each of their constituent elements separately
+rep_grouped <- function(X, n) {
+  x <- list() 
+  for (i in 1:n) {
+    x[[i]] <- X
+  }
+  return(x)
+}
+
+# uses the above altered list-of-lists repetition function above to: repeat the process of creating a supertree from the same set of input trees a given number of times by list-applying the superTree() function to a list of identical lists of the inputs trees. In this version of this function, the superTree funtion is being applied to different but identical elements of a list of length n
+replicate_supertree <- function(trees, n){
+  x <- rep_grouped(trees, n)
+  x <- lapply(x, function(treelist) {
+    x1 <- superTree(treelist, method = "MRP", rooted = TRUE)
+    x1$edge.length <- NULL
+    return(x1)
+    })
+  return(x)
+}
+
+# does the same as the above funciton but a tad more efficiently. Here, instead of applying each superTree() interation to a differnt element of a list of identical sets of input trees, this time the function is iteratively being repeated and its output being stored as the single element of 
+replicate_supertree2 <- function(trees, n) {
+  l <- list()
+for (i in 1:n) {
+  tree <- superTree(trees, method = "MRP", rooted = TRUE)
+  tree$edge.length <- NULL
+  l[[i]] <- tree
+}
+  return(l)
+}
+
+
+# Required for following tip and clade replacement functions. Finds the node from which another node branches using tree (object of class 'phylo') and child.node (node number)
+parent_node <- function(tree, child.node) {
+  all.nodes <- as.data.frame(tree$edge)
+  names(all.nodes) <- c("start", "end")
+  parent.node <- all.nodes[all.nodes$end == child.node, c("start")]
+  return(parent.node)
+}
+
+
+# the following allows the replacement of a single tip in a phylogeny with a clade of at least two related taxa (replacing a tip with another single tip can be more simply done by renaming a tip, for which a function already exists)
+replace_tip <- function(tree, tip, new_clade) {
+  # finds the tip-number of tip-taxon to be replaced
+  node <- which(tree$tip.label == tip) 
+  # adds id tag to new tips so that, in case one of the new tips is the same the the one being replaced (such as often occurs when adding sister taxa), we do in fact prune only the old tip at the end
+  new_clade$tip.label <- paste0(new_clade$tip.label, "__new") 
+  # sets root edge of new clade to be added onto the tree so that it goes to the right place and all new clades have standard behaviour under this function
+  new_clade$root.edge <- 0 
+  # adds the new clade as a sister taxon to the tip-to-be-replaced, attaching it at the parent node
+  tree <- bind.tree(tree, new_clade, where = parent_node(tree, node)) 
+  # deletes old tip
+  tree <- drop.tip(tree, tip) 
+  # removes new-tip ID tag
+  tree$tip.label <- sub("__new", "", tree$tip.label) 
+  return(tree)
+}
+
+
+#for finding the most recent common ancestor of two taxa; necessary for the replace_clade() function
+pairwise_mrca <- function(tree, basal.taxon, tipward.taxon) {
+  mrca.tree <- as.data.frame(mrca(tree))
+  subset.mrca.tree <- data.frame(mrca.tree[row.names(mrca.tree) %in% c(basal.taxon, tipward.taxon), names(mrca.tree)[names(mrca.tree) %in% c(basal.taxon, tipward.taxon)]]) 
+mrca.node <- min(subset.mrca.tree[subset.mrca.tree > length(tree$tip.label)])
+return(mrca.node)
+}
+
+
+# the following allows the replacement of an entire clade with another clade of at least two related taxa, requires tree to be specified, two tips (as character) whose most recent common ancestor (MRCA) is the root of the clade to be replaced (to identify its node number) and the new clade (as phylo object) to be added as the replcement to the old clade
+replace_clade <- function(tree, basal_clade_tip, tipward_clade_tip, new_clade) { 
+  # finds node number of clade to be replaced by finding the msot recent common ancestor to two descendants, care to be taken to choose a pair of tips such that their MRCA is in fact the desired node
+  clade_node <- pairwise_mrca(tree, basal_clade_tip, tipward_clade_tip)
+  # storing the names of the current tips which we will prune later
+  old_tips <- clade.members(clade_node, tree, tip.labels = TRUE)
+  # adds ID tag to new tips so that, in case one of the new tips is the same the the one being replaced, we do in fact prune only the old tip at the end
+  new_clade$tip.label <- paste0(new_clade$tip.label, "__new") 
+  # sets root edge of new clade to be added onto the tree so that it goes to the right place and all new clades have standard behaviour under this function
+  new_clade$root.edge <- 0 
+  # adds the new clade as a sister taxon to the tip-to-be-replaced, attaching it at the parent node
+  tree <- bind.tree(tree, new_clade, where = parent_node(tree, clade_node))
+  # deletes old tips based on what the descendent tips were on the unaltered tree before the new clade was added i.e. any duplicate taxa on old an dnew clades can be differentiated using the '__new' tag
+  tree <- drop.tip(tree, old_tips) 
+  # removes new-tip ID tag
+  tree$tip.label <- sub("__new", "", tree$tip.label) 
+  return(tree)
+}
+
+```
+
 
 ## Testing Currency of Taxon Names
 
+The following section seeks to check the names of taxa on both the Bayly and Thornhill trees in order to make sure taxa that differences in naming conventions don't cause taxa to be treated as seperate entities when they are in fact the same taxon. This was done by using the Australian Plant Names Index (APNI) and Australian Plant Census (APC) name-checking function (found here https://biodiversity.org.au/nsl/services/search/name-check) to determine where names on the Bayly and Thornhil trees were no longer current. Only taxa appearing on both trees and taxa with older synonyms appearing on the other tree that also have a synonym or current name in the trait dataset were looked at. This is because taxa not in the trait dataset or synonyms of taxa on the trait dataset will be pruned away eventually anyway as they are  not necessary for our analysis, and taxa that are only in one of the two phylogenies (assuming none of their synonyms are on the other tree) that will later be merged must only match the way that name is written in the trait dataset as there is no danger or creating diplicate tips for the same taxon upon merging the trees.
+
+Since not every name has been manually checked after looking through its taxonomic history and determining the circumscription of the current name, there is a chance that names that are identical and current on different trees and the trait dataset may refer to a different subset of individuals.
+
 ```{r fig.height = 25, fig.width=20}
-bayly.tree <- read.tree(file = "Input_data/Bayly_et_al_MPE_reSubmission_cp24_for_treebase_BL.nwk")
+# for initial looking at the tree
+bayly.tree <- read.tree(file = "../Input_data/Bayly_et_al_MPE_reSubmission_cp24_for_treebase_BL.nwk")
 plot(bayly.tree)
 plot(ggtree(bayly.tree) + geom_tiplab(size=4))
-#to remove the duplicated tips
+
+# to remove the duplicated tips (conveniently labelled with '_2' at the end)
 length(bayly.tree$tip.label)
-bayly.tree <- keep.tip(bayly.tree, bayly.tree$tip.label[!grepl("2", bayly.tree$tip.label)])
+bayly.tree <- keep.tip(bayly.tree,
+                  bayly.tree$tip.label[!grepl("2",bayly.tree$tip.label)])
+
+# checking that it worked and those two tips are indeed missing
 plot(bayly.tree)
+
+# getting rid of numbers at the end of taxon names
 bayly.tree$tip.label <- gsub("_1", "", bayly.tree$tip.label)
 bayly.tree$tip.label <- gsub("_", " ", bayly.tree$tip.label)
 bayly.tips <- data.frame("taxon" = bayly.tree$tip.label)
-#for namechecking
-#write.csv(bayly.tree$tip.label, file = "bayly_names_for_check.csv")
+
+# for namechecking
+#write.csv(bayly.tree$tip.label, file = "../Intermediate_Tree_Building_Products/bayly_names_for_check.csv")
 ```
 
-All names current except E. deglupta, which similarly does not show up anywhere on APNI. However, it is on the Thornhill tree and considered an accepted name with Blume as the authority.
+All names current on the Bayly Tree except E. deglupta, which similarly does not show up anywhere on APNI. However, it is on the Thornhill tree and considered an accepted name with Blume as the authority.
 
 ```{r fig.height= 120, fig.width=20}
-thorn.tree <- read.nexus(file = "Input_data/Eucalypt_Bayes.tre")
-# plot(thorn.tree)
-# plot(ggtree(thorn.tree) + geom_tiplab(size=5))
-#ggsave(ggtree(thorn.tree) + geom_tiplab(size=5), file = "thorntree.pdf", limitsize = FALSE, width = 25, height=100)
-# thorn.tips <- data.frame("taxon" = thorn.tree$tip.label)
-# grep("_[0-9]+", thorn.tips$taxon, value=TRUE)
-# thorn.tips$taxon2 <- sub("_[0-9]+", "", thorn.tips$taxon)
-# grep("_[A-Z].+$", thorn.tips$taxon2, value=TRUE)
-# thorn.tips$taxon3 <- sub("_[A-Z].+$", "", thorn.tips$taxon2)
-# grep("_[0-9]+$|_[A-Z].+$", thorn.tips$taxon, value=TRUE) #matches all those that have any capital letters or numbers at the end
-# thorn.tips$taxon[!grepl("_[0-9]+$|_[A-Z].+$", thorn.tips$taxon)]
-# thorn.tips$taxon4 <- sub("_[0-9]+$|_[A-Z].+$", "", thorn.tips$taxon) #gets rid of all the stuff on the end that isn't part of the taxon name
-# test <- c("GB0127_335", "H8215B72")
-# test1 <- sub("[0-9]+", "", test)
-# test2 <- gsub("[0-9]+", "", test)
-# test
-# test1
-# test2 # so sub only affects the first match within each element in the list but gsub affects every match within the entries regardless of how many there are
+# reading in Thornhill's tree
+thorn.tree <- read.nexus(file = "../Input_data/Eucalypt_Bayes.tre")
 
+# getting rid of collecting IDs and other extra parts of names in order to create a list that can be put into APNI name-checking website
 thorntips.for.nomcheck <- thorn.tree$tip.label
 thorntips.for.nomcheck <- sub("_[0-9]+$|_[A-Z].+$", "", thorntips.for.nomcheck)
 thorntips.for.nomcheck <- sub("subsp", "subsp.", thorntips.for.nomcheck)
 thorntips.for.nomcheck <- sub("var", "var.", thorntips.for.nomcheck)
 thorntips.for.nomcheck <- gsub("_", " ", thorntips.for.nomcheck)
-#!!!CAREFUL NOT TO OVERWRITE WHAT THIS NEXT FILE AS IT CONTAINS THE SYNONYMS IN ANOTHER SHEET!!!
-##write.csv(thorntips.for.nomcheck, file = "thorntips_for_check.csv", row.names = FALSE)
+#!!!CAREFUL NOT TO OVERWRITE THIS NEXT FILE, AS IT CONTAINS THE SYNONYMS IN ANOTHER SHEET!!!
+# write.csv(thorntips.for.nomcheck, file = "../Intermediate_Tree_Building_Products/thornhill_taxa_for_APC.csv", row.names = FALSE)
+# intermediate files such as name_check_thorntips.csv have the full output of the name-check on the full 675 in APC (in the Input_data folder); taxathorntips_for_check.csv and thorntips_for_check2.csv have the list of 20 taxa on the thorntree that were found using APC to have more current names
 ```
 
-Tips that are already listed as synonyms:
-Acmena smithii -> Syzigium smithii
+Many taxon names listed as 'not found' by the APC namecheck (most of the non-current ones are like this), some simply no longer current. Not all of the taxon names on the thornhill tree are (as currently written or their newer names) in the trait dataset so many will be pruned away later anyway.
+
+
+Tips that are already listed as synonyms themselves:
+Acmena smithii -> Syzigium smithii (this one isn't on the thorntree)
 Corymbia catenaria -> Corymbia watsoniana subsp. capillata
 C. dampieri -> C. greeniana
 C. dimorpha -> C. peltata
@@ -65,24 +187,24 @@ C. opaca -> C. terminalis
 C. porphyritica -> C. ellipsoidea
 C. variegata -> C. citriodora
 E. corticosa -> E. argophloia
-E. cuspidata -> E. angulosa
-E. largiflorens -> E. bicolor
-E. leptophylla -> E. foecunda
+E. cuspidata -> E. angulosa (latter in trait dataset)
+E. largiflorens -> E. bicolor (former in trait dataset)
+E. leptophylla -> E. foecunda (former in trait dataset, but there's already another tip with that former name)
 E. nitida -> E. ambigua
 E. persistens -> E. tardecidens
 E. petiolaris -> E. leucoxylon subsp. petiolaris
 E. pilligaensis -> E. woollsiana
 E. plauta -> E. dissimulata subsp. plauta
-E. pleurocarpa -> E. tetragona
+E. pleurocarpa -> E. tetragona (former in trait dataset)
 E. sparsifolia -> E. oblonga
-E. yangoura -> E. globoidea
+E. yangoura -> E. globoidea (latter in trait dataset)
 Hypocalymma linifolium -> Hypocalymma tetrapterum
 
-After checking the status of both the current names of these synonyms above (according to the supplementary material in the thorhill paper) as well as the older names, there are many cases where both the older and newer names are current on APC or some of the names are not found. None of the relevant names correspind to tips of the Bayly tree, though some are in the trait dataset.
+After checking the status of both the current names of these synonyms above (according to the supplementary material in the thorhill paper) as well as the older names, there are many cases where both the older and newer names are current on APC or some of the names are not found. None of the relevant names correspond to tips of the Bayly tree, though some are in the trait dataset.
 
-  Only E.cuspidata -> angulosa and E. yangoura -> E. globoidea need changing from the older names already being used in the thorn tips. However, both of the current names of these two taxa are already elsewhere in the tree so if we simply keep these tips as well, we can see where they are and determine if we want to keep them later.
+  Only E.cuspidata -> angulosa and E. yangoura -> E. globoidea need changing from the older names already being used in the thornhill tree tips. This is based on the fact that, of the 5 taxa that have either the current name or synonym on the trait dataset, only these two have the newer current name be the one that matches the trait dataset and so require the change so they match it. The other three taxa have the existing name match However, both of the current names of these two taxa are already elsewhere in the tree (there happens to be seperate tips on the tree for both taxon names) so if we simply keep these tips as well, we can see where they are and determine if we want to keep them later.
   
-  Otherwise the other taxa expected to showup on the namecheck as non-current based on not being those for which both older and newer names are current, after the two above have been changed:
+  Otherwise the other taxa expected to showup on the namecheck as non-current based on not being those for which both older and newer names are current (i.e. the ones where the latter name is supported as current by APC so we know what these are actually called now):
     - C. catenaria
     - C. dampieri
     - C. dimorpha
@@ -94,228 +216,235 @@ After checking the status of both the current names of these synonyms above (acc
     - E. yangoura 
 
 ```{r}
+# re-formatting the taxon labels on the tree to something more readable. While spaces in names can be an issue in many places in r, it seems to not interfere too much with the functionality of the rest of the code
 thorn.tree$tip.label <- sub("_[0-9]+$|_[A-Z].+$", "", thorntips.for.nomcheck)
 thorn.tree$tip.label <- sub("subsp", "subsp.", thorntips.for.nomcheck)
 thorn.tree$tip.label <- sub("var", "var.", thorntips.for.nomcheck)
 thorn.tree$tip.label <- gsub("_", " ", thorntips.for.nomcheck)
 thorn.tips <- data.frame("taxon" = thorn.tree$tip.label)
-# thorn.tree$tip.label[which(thorn.tree$tip.label == "Eucalyptus cuspidata")] <- "Eucalyptus angulosa"
-# thorn.tree$tip.label[which(thorn.tree$tip.label == "Eucalyptus yangoura")] <- "Eucalyptus globoidea"
+
+# Looking at where on the tree the current and superceded names are for the two taxa we will likely need to change the name of to see if they might be near or far from one another
 which(thorn.tree$tip.label == "Eucalyptus angulosa")
-which(thorn.tree$tip.label == "Eucalyptus cuspidata") #would form paraphyletic group w.r.t. E. incrassata when extra taxa are pruned
-#which(thorn.tree$tip.label == "Eucalyptus rugosa")
+## the following taxon would form paraphyletic group w.r.t. E. incrassata when extra taxa are pruned
+which(thorn.tree$tip.label == "Eucalyptus cuspidata") 
+## which(thorn.tree$tip.label == "Eucalyptus rugosa")
 which(thorn.tree$tip.label == "Eucalyptus yangoura")
-which(thorn.tree$tip.label == "Eucalyptus globoidea") # close but similarly not sister
-#which(thorn.tree$tip.label == "Eucalyptus lateritica")
+## close but similarly not sister
+which(thorn.tree$tip.label == "Eucalyptus globoidea") 
+# which(thorn.tree$tip.label == "Eucalyptus lateritica")
 ```
 
 ```{r}
-#now to check the rest of the tips
-thorntips.check <- as.data.frame(read.csv("Input_data/name_check_thorntips.csv", header = TRUE))
+# now to check the rest of the tips (excluding the ones where we already know what the current form of the name is meant to be)
+thorntips.check <- as.data.frame(read.csv("../Input_data/name_check_thorntips.csv", header = TRUE))
 non.current.thorntips <- data.frame("taxon" = thorntips.check[!thorntips.check$Census == "APC", c("Search.term")])
+## now to remove the taxa we know the current names of and aren't a mystery we need to check. Note that Corymbia porphyritica is absent from the list to begin with so removing the following 9 taxa only reduces the taxon list by 8 not 9
 sorted.synonyms.thorn <- c("Corymbia catenaria", "Corymbia dampieri", "Corymbia dimorpha", "Corymbia dolichocarpa", "Corymbia porphyritica", "Corymbia variegata", "Eucalyptus pilligaensis", "Eucalyptus plauta", "Eucalyptus yangoura")
 non.current.thorntips2 <- data.frame("taxon" = non.current.thorntips$taxon[!non.current.thorntips$taxon %in% sorted.synonyms.thorn])
-nc.thorntips.in.bayly <- data.frame("taxon"= non.current.thorntips2$taxon[non.current.thorntips2$taxon %in% bayly.tips]) #none in bayly bc all bayy tips are current
-# non.current.thorntips$taxon[non.current.thorntips$taxon %in% sorted.synonyms.thorn]
-#write.csv(non.current.thorntips2, file = "final_thorntips_for_check.csv", row.names = FALSE)
 
-sum(all.taxa.clean$taxon %in% thorntips.for.nomcheck) #103 now
-trait.taxa.nonthorn <- data.frame('taxon' = all.taxa.clean$taxon[!all.taxa.clean$taxon %in% thorntips.for.nomcheck]) #55 taxa not on the thornhill tree
-sum(trait.taxa.nonthorn$taxon %in% bayly.tips$taxon) #hence of the 55 taxa not on the thorntree, only one of those is on the bayly tree instead (E. aromaphloia)
+# Now that we know which versions of taxon names might be in the thornhill tree and the trait dataset, we need to check if any of the non-current taxon names in the thornhill tree are in the Bayly as we'll be merging them later
+## none in bayly tree bc all bayly tips were current
+non.current.thorntips$taxon[non.current.thorntips$taxon %in% sorted.synonyms.thorn]
+non.current.thorntips2$taxon[non.current.thorntips2$taxon %in% bayly.tips] 
+# write.csv(non.current.thorntips2, file = "final_thorntips_for_check.csv", row.names = FALSE)
 
-trait.taxa.nonthorn[trait.taxa.nonthorn$taxon %in% bayly.tips$taxon,] # E. aromaphloia is on the bayly tree instead
-#will still need to add 54 taxa to these trees
+# checking how many of our trait taxa match thornhill-tree taxa (thorntips.for.nomcheck contains all thornhill taxa before they were name-checked), 107 taxa are in this category
+sum(all.taxa.clean$taxon %in% thorntips.for.nomcheck) 
+## the following indicates there are 58 taxa in the trait dataset that are not on the thornhill tree at all
+trait.taxa.nonthorn <- data.frame('taxon' = all.taxa.clean$taxon[!all.taxa.clean$taxon %in% thorntips.for.nomcheck])
+## the following indicates that, of the 58 taxa not on the thorntree, only one of those is on the bayly tree instead (E. aromaphloia)
+sum(trait.taxa.nonthorn$taxon %in% bayly.tips$taxon) 
+## now to see which species that single taxon on the bayly tree is, E. aromaphloia, will still need to add 57 (58-E. aromaphloia) taxa to these trees
+trait.taxa.nonthorn[trait.taxa.nonthorn$taxon %in% bayly.tips$taxon,] 
 
 non.matching.trait.taxa <- data.frame("taxon" = trait.taxa.nonthorn[!trait.taxa.nonthorn %in% bayly.tips$taxon,])
 
-sum(!bayly.tips$taxon %in% thorntips.for.nomcheck) #11 so it's still worth checking the bayly tree as well
+# checking if there are any tips on Bayly tree that are not on the thornhill tree, there's 11 so it's still worth checking the bayly tree as well. This is done in the next section.
+sum(!bayly.tips$taxon %in% thorntips.for.nomcheck) 
 ```
+
 
 Thorn tips non-current and without synonym listed:
 
   Most of these are listed as 'not found' on APC so there's no way to know if they do correspond to more current names that are on the tree and so until there's more info on them, they can be left as pruned taxa and assumed to not have current names or synonyms matching trait taxa.
   
-  For those that have a match on APC and therefore have observable taxonomic history:
+  For those that have a match on APC and therefore have observable taxonomic history (and we can hence infer what the current name might be):
   
-  - E. caesia subsp. caesia -> E. caesia (in neither other tree)
+  - E. caesia subsp. caesia -> E. caesia (in neither other tree, so making sure the form of the name 'matches anything is unecessary)
   - E. argyphea -> E. falcata (already elsewhere on thorntree)
-  - E. communalis (APC Excluded) -> no longer distinct and considered intergrade between E. adesmophloia and E. obesa(neither of which are in either of the other trees)
+  - E. communalis (APC Excluded) -> no longer distinct and considered intergrade between E. adesmophloia and E. obesa (neither of which are in either of the other trees)
   - E. medialis -> E. hebetifolia (already elsewhere on thorntree)
   - E. brachycorys -> E. cometae-vallis (only on thorntree)
   - E. persistens subsp. tardecidens -> prob. E. tardecidens but ambiguous (could be E. persistens though unlikely) (neither current name is in either other tree)
   - E. apodophylla subsp. provecta -> E. apodophylla (in neither tree)
   - E. brunnea -> E. deanei (only on thorntree)
-  - E. disclusa -> E. interstans (onlky on thorntree)
+  - E. disclusa -> E. interstans (only on thorntree)
   - E. splendens subsp. splendens -> E. splendens (only on thorntree)
   - E. approximans subsp. codonocarpa -> E. codonocarpa (only on thorntree)
   - E. piperita subsp. piperita -> E. piperita (ON TRAIT DATASET!!)
   - E. andrewsii subsp. andrewsii -> E. andewsii (only on thorntree)
   - E. ralla -> E. tenella (in traits but elsewhere on thorntree)
-  - E. oblonga -> globoidea or sparsifolia (!!!GLOBOIDEA in traits dataset and this taxon likely represents that bc there salready E. sparsifolia ni the thorntree)
+  - E. oblonga -> globoidea or sparsifolia (E. globoidea in traits dataset and this taxon likely represents that bc thers already E. sparsifolia in the thorntree, but E. globoidea already exists as a seperate tip on the tree anyway so it doesn't require action)
   - E. eudesmioides subsp. eudesmioides -> E. eudesmioides (only on thorntree)
   - C. lignans subsp. lignans -> C. lignans (only on thorntree)
   - A. exul -> A. bakeri subsp. bakeri (already elsewhere on thorntree and in the trait dataset)
   
   - E. comitae vallis (misspelling of above E. cometae-vallis, hence why not found)
 
-So from this above investigation, only E. piperita subsp. piperita needs to be changed to E. piperita on grounds of taxonomy and inclusion in the traits dataset.
+So from this above investigation, only E. piperita subsp. piperita needs to be changed to E. piperita on grounds of taxonomy and inclusion in the traits dataset. Where there was already another tip with the current name, that existing tip can be used to represent the position of that trait-taxon.
 
 ```{r}
-#taxonomic change relevant to trait taxon list
+# taxonomic change relevant to trait taxon list
 thorn.tree$tip.label[thorn.tree$tip.label == "Eucalyptus piperita subsp. piperita"] <- "Eucalyptus piperita"
 ```
 
 ```{r}
-#just to check mis-spellings
+# just to check mis-spellings
 not.found.thorntips <- data.frame("taxon" = thorntips.check[thorntips.check$Found. == "FALSE", c("Search.term")])
 ```
 
 ```{r}
-#taxonomic change relevant to trait taxon list
+# taxonomic change relevant to trait taxon list based on miss-spelling on the thornhill tree causing this taxon to appear 'not found'
 thorn.tree$tip.label[thorn.tree$tip.label == "Eucalyptus decipiens subsp. decipens"] <- 'Eucalyptus decipiens subsp. decipiens'
 ```
 
 
-## Adding Species and Species
-
-Now to test which of the non-matching subspecies have species/other_sspp. that are simply resolved differently on the thorn tree or bayly tree.
-
-```{r}
-non.matching.trait.subspecies <- data.frame("taxon" = non.matching.trait.taxa[grepl("subsp.", non.matching.trait.taxa$taxon),])
-nmt.spp.for.sspp <- data.frame("species" = str_split_fixed(non.matching.trait.subspecies$taxon, " ", 4)[,2])
-
-thorn.tip.spp <- data.frame("species" = str_split_fixed(thorn.tips$taxon, " ", 4)[,2])
-
-#now to check how many there are of the 28 mismatching sspp trait taxa have corresponding species in the thorn.tree
-nmt.spp.for.sspp[nmt.spp.for.sspp$species %in% thorn.tip.spp$species,]
-sum(nmt.spp.for.sspp$species %in% thorn.tip.spp$species)
-
-sum(nmt.spp.for.sspp[nmt.spp.for.sspp$species %in% thorn.tip.spp$species,] == 'globulus') # 3
-sum(nmt.spp.for.sspp[nmt.spp.for.sspp$species %in% thorn.tip.spp$species,] == 'radiata') # 1
-sum(nmt.spp.for.sspp[nmt.spp.for.sspp$species %in% thorn.tip.spp$species,] == 'costata') # 1
-
-
-#thorn.tips$taxon[thorn.tip.spp$species == "tricarpa"]
-```
-
-27/28 subsp. taxa from traits dataset have a species match on the thorn tree.
-25 taxa with subspecies epithets non-mathcing from the triats dataset have same-species taxa on the thorntree (excl. costata, cinerea and decipiens):
-
-5 pauciflora subspecies (non autonyms) on trait dataset have the autonymic subspecies as a representative on the thorn.tree, hence it's ok if they don't match since the autonymic subsp. is also in traits and is already goign to keep tip:
-  - will need to add these manuall later
-
-2 non-autonymic subsp. in traits represented by already set to match autonymic subsp. on the thorn.tree
-
-E. calycogona subsp. trachybasis nearest represented by E. calycogona subsp. calycogona
-  -must include this tip from thorn tree in pruned thorn tree
-
-E. tricarpa subsp. tricarpa is species only on thorn tree
- 
-  .
-  .
-  .
-      
-
-```{r}
-non.matching.trait.SPECIES <- data.frame("taxon" = non.matching.trait.taxa$taxon[!grepl("subsp.", non.matching.trait.taxa$taxon)])
-#length(non.matching.trait.subspecies$taxon) + length(non.matching.trait.SPECIES$taxon) # ==55 so all good
-nmt.spp.for.spp <- data.frame("species" = str_split_fixed(non.matching.trait.SPECIES$taxon, " ", 4)[,2])
-nmt.spp.for.spp[nmt.spp.for.spp$species %in% thorn.tip.spp$species,]
-sum(nmt.spp.for.spp$species %in% thorn.tip.spp$species)
-```
-10/27
-
-
 ## Matching Bayly and Thornhill Taxa
 
-Need to figure out how many of the non-matching (with the thorntree) taxa in the Bayly tree have subspecies on the thorntree
+Need to figure out how many of the 11 non-matching (with the thorntree) taxa in the Bayly tree may not match simply because of different levels of resolution in the two trees. How many of those 11 taxa have member of the same species on the thorntree?
 
 ```{r}
-non.matching.bayly.tips <- data.frame("taxon" = bayly.tips$taxon[!bayly.tips$taxon %in% thorn.tips$taxon]) #all but 11 bayly tips have atches in the thorn tree
+# data frame of the 11 taxa in the Bayly tree that aren't found in the Thornhill tree
+non.matching.bayly.tips <- data.frame("taxon" = bayly.tips$taxon[!bayly.tips$taxon %in% thorn.tips$taxon])
 
-#now do those 11 have correspondent subspecies in the thorn tree
-nmt.bayly.spp <- data.frame("species" = str_split_fixed(non.matching.bayly.tips$taxon, " ", 4)[,2])
-nmt.bayly.spp[!nmt.bayly.spp$species %in% thorn.tip.spp$species,] 
+# now do those 11 have correspondent subspecies in the thorn tree
+## first need to split the taxon names to isolate the species from the subspecies epithets
+nmt.bayly.spp <- data.frame("species" = str_split_fixed(non.matching.bayly.tips$taxon, " ", 4)[,2]) 
+
+# species epithets for all taxa on the thornhil tree
+thorn.tip.spp <- data.frame("species" = str_split_fixed(thorn.tips$taxon, " ", 4)[,2])
+
+# how many of the 11 taxa in nmt.bayly.spp have a macth at the species level i.e. same species epithet, if not same subspecies epithet; 9 taxa of the 11 appear this way
 sum(nmt.bayly.spp$species %in% thorn.tip.spp$species)
+
+# Stockwellia quadrifida and Allosyncarpia ternata are the only ones that have no species-level match in the thornhill tree, which makes sense as these taxa are the outgroups that were used differently in the two papers/studies
+nmt.bayly.spp[!nmt.bayly.spp$species %in% thorn.tip.spp$species,] 
 ```
 
 The two Bayly taxa that have no species match on the thorntree are the outgroups Allosyncarpia ternata and Stockwellia quadrifida.
-The remaining 9 Bayly taxa with no match on the thorn tree, have a species epithet that does match thorn tree taxa.
+The remaining 9 Bayly taxa with no match on the thorn tree, but have a species epithet that does match thorn tree taxa.
 
 ```{r}
-thorn.tips$taxon[thorn.tip.spp$species %in% nmt.bayly.spp$species] #finds thorn tips with species epithets matching bayly tips that don't otheriwise have a thorn tip match
+# finds how taxa with the same species but not subspecies epithets as bayly taxa are written on the thorntree
+thorn.tips$taxon[thorn.tip.spp$species %in% nmt.bayly.spp$species] 
 ```
 
-All of those 9 taxa are indeed those with subspecies epithets and since, there are only 9, using only the species name shouldn't create too much more work later
+All of those 9 taxa are indeed those with subspecies epithets and since, there are only 9, using only the species name shouldn't create too much more work later to add the subspecies epithets back in
 
-Checking how many of theBayly tips don't match the trait taxa and how many of those are in the above list of 9 and will have to be changed back to their subspecies version that is actually in the trait dataset
+Now checking how many of the Bayly tips don't match the trait taxa and how many of those are in the above list of 9 and will have to be changed back to their subspecies version that is actually in the trait dataset
 
 How many of the 9 taxa have subspecies in the trait dataset?
 
 ```{r}
+# need to create lists of species names for taxa in the trait dataset that don't completely match tips in the thorntree, but for both the trait taxa that do and don't have 
+## first to find the trait taxa not in the thornhill tree that are resolved to subspecies level
+non.matching.trait.subspecies <- data.frame("taxon" = non.matching.trait.taxa[grepl("subsp.", non.matching.trait.taxa$taxon),])
+## the following gives the species names for taxa in the trait dataset that have subspecies epithets and don't match the thornhill tree
+nmt.spp.for.sspp <- data.frame("species" = str_split_fixed(non.matching.trait.subspecies$taxon, " ", 4)[,2])
+## following line gives the species names for taxa in the trait dataset that do not have species epithets and don't match
+nmt.spp.for.spp <- data.frame("species" = str_split_fixed(non.matching.trait.taxa$taxon[!grepl("subsp.", non.matching.trait.taxa$taxon)], " ", 4)[,2])
+## now to make a total list of species names that exist in the trait dataset but not on the thorntree
 nmt.species <- rbind(nmt.spp.for.spp, nmt.spp.for.sspp)
+## the following gets rid of the repeated species names from the trait dataset contaning multiple subspecies from the same species
 nmt.species <- data.frame("species" = nmt.species$species[!duplicated(nmt.species$species)])
 
-thorntip.sspp.for.nmt.bayly <- thorn.tips$taxon[thorn.tip.spp$species %in% nmt.bayly.spp$species]
-thorntip.sspp.for.nmt.bayly.spp <- str_split_fixed(thorntip.sspp.for.nmt.bayly, " ", 4)[,2]
+# creating vector of taxa on the thorntree corresponding to bayly taxa that don't match at the subspecies level
+thorntip.spp.for.nmt.bayly <- thorn.tips$taxon[thorn.tip.spp$species %in% nmt.bayly.spp$species]
+# creating vector of species epithets on the thorntree corresponding to bayly taxa that don't match at the subspecies level
+thorntip.spp.for.nmt.bayly.spp <- str_split_fixed(thorntip.spp.for.nmt.bayly, " ", 4)[,2]
 
+# created a column of all the trait taxa with subspecies epithets, 50 taxa in total
 trait.taxa.subsp <- data.frame('taxon' = all.taxa.clean$taxon[grepl("subsp", all.taxa.clean$taxon)])
+# now extracting the species epithets for all trait taxa with subspecies epithets, note this contains the duplicates
 trait.taxa.spp.for.sspp <- str_split_fixed(trait.taxa.subsp$taxon, " ", 4)[,2]
 
+# creating a column of the 115 species in the trait dataset that DO NOT have subspecies epithets
 trait.taxa.species <- data.frame('taxon' = all.taxa.clean$taxon[!grepl("subsp", all.taxa.clean$taxon)])
+# creating a vector of species epithets for those trait taxa with no subspecies epithets
 trait.taxa.spp.for.spp <- str_split_fixed(trait.taxa.species$taxon, " ", 4)[,2]
 
-sum(thorntip.sspp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp)
-sum(trait.taxa.spp.for.sspp %in% thorntip.sspp.for.nmt.bayly.spp) #there are more this way around because the trait dataset can contain more than one subspecies with the same species epithet
-trait.taxa.spp.for.sspp[trait.taxa.spp.for.sspp %in% thorntip.sspp.for.nmt.bayly.spp]
-thorntip.sspp.for.nmt.bayly.spp[thorntip.sspp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp]
-thorntip.sspp.for.nmt.bayly.spp[!thorntip.sspp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp]
-
-# extra.3ofthe9 <- thorntip.sspp.for.nmt.bayly.spp[!thorntip.sspp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp]
-# 
-# extra.3ofthe9[extra.3ofthe9 %in% trait.taxa.spp.for.spp] #aromaphloia so good
+# checking how many of the 9 species on the thornhill tree (that match the unmatched bayly taxa at the species level) are also in the list of subsp.-resoled non-matching trait taxa, there are 6 out of the 9
+sum(thorntip.spp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp)
+# the following gives the species epithets of the 6 taxa
+thorntip.spp.for.nmt.bayly.spp[thorntip.spp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp]
+# the following give the species epithets of the remining 3 taxa that are not in the trait dataset 
+thorntip.spp.for.nmt.bayly.spp[!thorntip.spp.for.nmt.bayly.spp %in% trait.taxa.spp.for.sspp]
 ```
 
-There are 6 taxa within these 9 that have subspecies on the traits dataset (of remaining 3, 2 aren't even in the traits dataset and the last is E. aromaphloia, which will match the species in the trait dataset anyway) that will need to be changed later.
-Therefore there should be three taxa on this list of 9 bayly taxa that do match the trait dataset bc it also does not resolve them down to subspecies level
+There are 6 taxa within these 9 that have subspecies on the traits dataset (of remaining 3, 2 aren't even in the traits dataset and the last is E. aromaphloia, which will match the species in the trait dataset anyway) that will need to be changed back later to match the trait dataset.
+Therefore, there should be three taxa on this list of 9 bayly taxa that do match the trait dataset bc it also does not resolve them down to subspecies level. We now convert all 
 
 ```{r}
-thorn.tree$tip.label[thorn.tree$tip.label %in% thorntip.sspp.for.nmt.bayly] <- sub(" subsp.+$", "", thorn.tree$tip.label[thorn.tree$tip.label %in% thorntip.sspp.for.nmt.bayly])
-
-# thorn.tips.change.test <- sub(" subsp.+$", "", thorn.tree$tip.label[thorn.tree$tip.label %in% thorntip.sspp.for.nmt.bayly])
-# bayly.tips$taxon[bayly.tips$taxon %in% thorn.tips.change.test]
+# removing the subspecies epithets for the 9 thorntree taxa so they'll match the bayly tree taxa when those trees are merged
+thorn.tree$tip.label[thorn.tree$tip.label %in% thorntip.spp.for.nmt.bayly] <- sub(" subsp.+$", "", thorn.tree$tip.label[thorn.tree$tip.label %in% thorntip.spp.for.nmt.bayly])
 
 
 #now there should only be 2 non-matched between bayly tree and thorn tree
 thorn.tips2 <- data.frame('taxon' = thorn.tree$tip.label)
-bayly.tips$taxon[!bayly.tips$taxon %in% thorn.tips2$taxon] #good
+
+# confirming they are the outgroups
+bayly.tips$taxon[!bayly.tips$taxon %in% thorn.tips2$taxon] 
 ```
 
-##2nd Adding Species/Subspecies
+Bayly tips 'not' on Thornhill tree:
+
+Allosyncarpia ternata -> not on thorntree but also not in trait dataset as it was simply a different outgroup
+Stockwellia quadrifida -> not on thorntree but also not in trait dataset anyway so it will be pruned away regardless
+
+The following 6/11 taxa are on the trait dataset and will have to have subspecies epithets added back in to match the trait dataset after the bayly and thornhill trees are merged:
+Angophora costata -> on thorntree as subsp. costata
+E. camaldulensis -> on thorntree as subsp. camaldulensis
+E. delegatensis -> on Thorntree as subsp. delegatensis
+E. globulus -> on thorntree as as subsp. globulus
+E. marginata -> on thorntree as subsp. marginata
+E. radiata -> on thorntree as subsp. radiata
+
+3 taxa in this list that are not in the trait dataset or are without a subspecies epithet:
+E. aromaphloia -> on thorntree as subsp. aromaphloia, but on trait dataset as only the species epithet
+E. diversifolia -> on thorntree as subsp. diversifolia but not in trait dataset
+E. spathulata -> on thorntree as subsp. spathulata but not in trait dataset
+
+
+
+## Adding Species and Subspecies
+
+Many of the taxa in the trait dataset are resolved down to a different taxonomic level than the trees (i.e. subspecies when the tree only goes down to species level, or down to species level when the trees go down to subspecies). Yet, it appears that the Thornhill tree only includes a single member of each species even when there are multiple subspecies, hence there is some assumption of species monophyly being made, especially in the cases where Thornhill tips are not resolved down to subspecies. As a result it is not partiular egregious for us to make the assumption that any member of a species can be used to represent the position of all members of that species i.e. species are monophyletic.
+Now to test which of the non-matching subspecies have species/other_sspp. that are simply resolved differently on the thorn tree or bayly tree. This may not be the case for all species with no matches, but it is the case with the vast majority.
 
 Now to redo the namechecking with the traits dataset to see if the 18 taxa are still there:
 
 ```{r}
-non.matching.trait.taxa2 <- data.frame('taxon' = all.taxa.clean$taxon[!all.taxa.clean$taxon %in% thorn.tips2$taxon]) # 60 (i.e. the 59 taxa from before (54 minus E. piperita) + the 6 taxa that now don't match because of the renaming so as expected)
-
-#for the subspecies non-matching in the trait dataset
+# now to create a new list of trait taxa that don't match the thornhill tree names; 62 taxa now, 58 taxa we had before + the 6 taxa that have now been changed but minus the 2 thornhill taxa (E. piperita and E. decipiens) that were changed to match the trait dataset
+non.matching.trait.taxa2 <- data.frame('taxon' = all.taxa.clean$taxon[!all.taxa.clean$taxon %in% thorn.tips2$taxon]) 
+# for the non-matching trait taxa, which have subspecies epithets?
 non.matching.trait.subspecies2 <- data.frame("taxon" = non.matching.trait.taxa2[grepl("subsp.", non.matching.trait.taxa2$taxon),])
+# the species epithets for such taxa
 nmt.spp.for.sspp2 <- data.frame("species" = str_split_fixed(non.matching.trait.subspecies2$taxon, " ", 4)[,2])
 
+# full thornhill list again but slightly altered
 thorn.tip.spp2 <- data.frame("species" = str_split_fixed(thorn.tips2$taxon, " ", 4)[,2])
 
-#now to check how many there are of the 34 (28 + 6) mismatching sspp trait taxa have corresponding species in the thorn.tree
-nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] #all but syncarpia glomulifera
-# sum(nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species)
-
-nmt.spp.for.sspp2[!nmt.spp.for.sspp2$species %in% nmt.spp.for.sspp$species,] #camaldulensis, delegatensis, marginata
-#only three new ones bc the other three taxa (that make up the six that now don't match already had subspecies that didnt match and so were already on the list as species and the above function doesn't return all duplicates
-
-length(nmt.spp.for.sspp$species)
-length(nmt.spp.for.sspp2$species)
-
+# now to check how many there are of the 34 (28 + 6) mismatching sspp trait taxa have corresponding species in the thorn.tree; 33 of 34 match
+nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,]
+# to verify that it is the outgroup species Syncarpia glomulifera that does not match the thornhill tree
 nmt.spp.for.sspp2[!nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,]
 
+
+# camaldulensis, delegatensis, marginata returned by following call:
+## only three new names bc the other three taxa (that make up the six that now don't match) already had subspecies that didnt match and so were already on the list as species and the above function only returns completely new names and not new duplicates of existing names
+nmt.spp.for.sspp2[!nmt.spp.for.sspp2$species %in% nmt.spp.for.sspp$species,] 
+
+# checking the number of subspecies for each unique species (21 unique species) within the 34 of nmt.spp.for.sspp2, the number is listed at the end of the line if it more than 1
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "globulus") # now 4 not 3
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "radiata") # now 2 not 1
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "costata") # now 2 not 1
@@ -338,66 +467,62 @@ sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] ==
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "ligulata")
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "decipiens")
 sum(nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,] == "conglobata")
-
-nm.trait.sspp <- nmt.spp.for.sspp2[nmt.spp.for.sspp2$species %in% thorn.tip.spp2$species,]
-nm.trait.sspp <- data.frame('species' = nm.trait.sspp[!duplicated(nm.trait.sspp)])
 ```
 
-These 33/34 non-matching trait subspecies that have species epithets on the thorn tree (Syncarpia glomulifera subsp. glomulifera does not have any match at all on the thorn tree so will have to be dealth with some other way) can be positioned as follows:
+These 33/34 non-matching trait subspecies that have species epithets on the thorn tree (Syncarpia glomulifera subsp. glomulifera does not have any match at all on the thorn tree so will have to be dealt with and added to it in some other way) can be positioned as follows:
 
-  - Firstly we must rename/add those 6 names that were changed on the thorn tree to match the bayly tree:
+  - Firstly, once the two trees are merged (this will be done later) we will rename/add those 6 names back to what they are in the trait dataset in order to get them to match:
       
-      - E. camaldulensis -> E. camaldulensis subsp. camaldulensis (theres only one subspecies here)
-      - E. globulus sspp. (there are 4) attach where E. globulus is attached
-      - E. delegatensis -> E. delegatensis subsp. delegatensis
+      - E. camaldulensis -> E. camaldulensis subsp. camaldulensis (only this subsp. in trait dataset)
+      - E. globulus sspp. (there are 4 in the trait dataset) attach where E. globulus is attached
+      - E. delegatensis -> E. delegatensis subsp. delegatensis (only this subsp. in trait dataset)
       - E. radiata sspp. (there are 2) atatch where E. radiata is positioned
-      - E. marginata ->  E. marginata subsp. marginata (there's only one)
-      - Angophora costata -> Angophora costata subsp. costata
+      - E. marginata ->  E. marginata subsp. marginata (only this subsp. in trait dataset)
+      - Angophora costata -> Angophora costata subsp. costata (only this subsp. in trait dataset)
+ 
  
   - For the rest:
   
-      - E. pauciflora subspecies (there are 5) can be attached where E. pauciflora subsp. pauciflora is positioned
+      - E. pauciflora subspecies (there are 5) can be attached where E. pauciflora subsp. pauciflora is positioned (already matches a trait taxon)
       - E. viminalis (there are 2) can be attached as sister to E. viminalis subsp. viminalis
-      - E. calycogona subsp. trachybasis can be the new name of the autonymic thorn taxon subsp.
-      - E. cinerea sspp. (there are 2) can be added and replace E. cinerea subsp. triplex 
+      - E. calycogona subsp. trachybasis can be the new name of the autonymic subsp. on thorntree (i.e. replacing the thornhill subsp. with the subsp. on the trait dataset we assume would have the same position relative to the rest of the taxa)
+      - E. cinerea sspp. (there are 2) can be added and replace the position of E. cinerea subsp. triplex 
       - E. tricarpa -> autonymic subsp.
       - E. camphora subsp. camphora -> E. camphora subsp. humeana
       - E. sideroxylon -> E. sideroxylon subsp. sideroxylon
       - E. alligatrix subsp. alligatrix -> E. alligatrix subsp. limaensis
       - E. baueriana sspp. (there are two) replace the E. baueriana tip
-      - E. leucoxylon subsp. stephaniae can be added sister to E. leucoxylon subsp. leucoxylon from traits
+      - E. leucoxylon subsp. stephaniae can be added sister to E. leucoxylon subsp. leucoxylon from trait dataset
       - E. polyanthemos subsp. polyanthemos -> E. polyanthemos subsp. vestita
-      - E. tereticornis subsp. mediana can be added sister to E. tereticornis subsp. tereticornis from traits
+      - E. tereticornis subsp. mediana can be added sister to E. tereticornis subsp. tereticornis from traits (don't need to keep this tip as it will already be kept when pruning the thornhill tree)
       - E. marginata -> E. marginata subsp. marginata
       - E. ligulata subsp. ligulata -> E. ligulata subsp. stirlingica
       - E. decipiens subsp. decipiens replaced by E. decipiens + E. decipiens subsp. chalara
       - E. conglobata subsp. conglobata -> E. conglobata subsp. perata
       
   
-Now for the non-subspecies trait taxa that don't match.
+Now for the non-subspecies trait taxa that don't match (i.e. trait taxa that thorhill resolve down to subspecies but the trait dataset does not):
 
 ```{r}
-non.matching.trait.SPECIES2 <- data.frame("taxon" = non.matching.trait.taxa2$taxon[!grepl("subsp.", non.matching.trait.taxa2$taxon)])
-#length(non.matching.trait.subspecies2$taxon) + length(non.matching.trait.SPECIES2$taxon) # == 60 so all good
-nmt.spp.for.spp2 <- data.frame("species" = str_split_fixed(non.matching.trait.SPECIES2$taxon, " ", 4)[,2])
+# data frame of the remaining 28 trait taxa (out of 62 that don't match the thornhill tree names) that do NOT have subspecies epithets
+non.matching.trait.SPECIES <- data.frame("taxon" = non.matching.trait.taxa2$taxon[!grepl("subsp.", non.matching.trait.taxa2$taxon)])
+## checking the length is 62 when combined to check code is doing what it should
+length(non.matching.trait.subspecies2$taxon) + length(non.matching.trait.SPECIES$taxon) 
+
+# now extracting their species epithets similarly to what was done for the other non-matching trait taxa, note there are no duplicates in this list of 28
+nmt.spp.for.spp2 <- data.frame("species" = str_split_fixed(non.matching.trait.SPECIES$taxon, " ", 4)[,2])
+# determining which of these species has a subspecies (another member of the species) on the thornhill tree, there are 8 and then the remaining 20 do not have species-level matches at all
 nmt.spp.for.spp2[nmt.spp.for.spp2$species %in% thorn.tip.spp2$species,]
 nmt.spp.for.spp2[!nmt.spp.for.spp2$species %in% thorn.tip.spp2$species,]
-
-#nmt.spp.for.spp[nmt.spp.for.spp$species %in% thorn.tip.spp$species,]
-
-sum(nmt.spp.for.spp2$species %in% thorn.tip.spp2$species) #8 so they all fit well and are two less than initially due to fixing piperita and Var. ovata
 ```
 
 
+For these 8/28 trait species that have subspecies on the thorn tree, said subspecies can be renamed to get rid of the subspecies epithet in order to find the position of these species on the tree (i.e. they can use the position of the subspecies to decide where the species goes on he tree since we're assuming species monophyly):
 
-
-For these 9/26 trait species that have subspecies on the thorn tree:
-
-  - The ovata problem should disappear once I change that name above - good it has disappeared
   - E. willisii subsp. willisii -> E. willisii
   - E. preissiana subsp. preissiana -> E. preissiana
   - E. wandoo subsp. wandoo -> E. wandoo
-  - (E. decipiens subsp. decipiens -> E. decipiens if not already replaced by above substitution)
+  - E. decipiens subsp. decipiens -> E. decipiens (now that the mis-spelling was corrected earlier)
   - E. xanthonema subsp. xanthonema -> E. xanthonema
   - E. uncinata subsp. uncinata -> E. uncinata
   - E. flocktoniae subsp. flocktoniae -> E. flocktoniae
@@ -409,7 +534,8 @@ Also, don't forget to: E. vegrandis subsp. vegrandis -> E. vergrandis in order t
 To check for any species with more than one subspecies in rder to be sure of the monophyly of the species taxa:
 
 ```{r}
-sum(duplicated(thorn.tips2)) #none so we know that no species has more than one representative on this tree
+# none so we know that no species has more than one representative on this tree
+sum(duplicated(thorn.tips2)) 
 ```
 
 Hence we don't have to worry about some species having more multiple representatives in different places in the tree and then be uncertain where a new subspecies taxon should be placed bc the species itself is non-monophyletic; and the assumption that any subspecies is a representative of its species can hold and we can replace any subspecies with another or the species alone. 
@@ -421,13 +547,13 @@ For those remaining:
 nmt.spp.for.spp2[!nmt.spp.for.spp2$species %in% thorn.tip.spp2$species,]
 ```
 
-For the 17 (these 17 + Syncarpia from the subspecies list that didn't even match a species, then minus the E. vergrandis here bc I know that only creates a problem bc it is mis-spelt on the trait dataset itself) that have no match of even species level:
+For the 20 (these 20 + Syncarpia from the subspecies list that didn't even match a species, then minus the E. vergrandis here bc I know that only creates a problem bc it is mis-spelt on the trait dataset itself) that have no match of even species level:
 
 - E. falciformis: nomeclatural synonym of basionym E. willisii subsp. falciformis (already have willisii on tree)
 
 - E. sabulosa: nomenclatural synonym of E. aromaphloia subsp. sabulosa (already have aromaphloia on tree)
 
-- E. silvestris considered under E. odorata but also sometimes under E. microcarpa (latter alread on tree) (Nicolle also has some subspecies of E. wimmerensis as synonyms)
+- E. silvestris considered under E. odorata but also sometimes under E. microcarpa (latter already on tree) (Nicolle also has some subspecies of E. wimmerensis as synonyms)
 
 - E. wimmerensis poorly resolved from E. viridis and E. polybractea and possibly E. cajuptea (the former two are on the thornhill tree so will be kept as tips as well)
 
@@ -445,13 +571,13 @@ For the 17 (these 17 + Syncarpia from the subspecies list that didn't even match
 
 - E. chapmaniana: little information but Nicolle says it's in Viminales subser Circulares wih rubida and dalrympleana and co.)
 
-- E. behriana: almost no info but same series as largiflorens (in trait dataset; also populnea and persistens both on thorn tree) (intertexta, orgadophila, sparsa, )(we'll leave the thorn tree memebrs of that series for now since only largiflorens is on the trait dataset)
+- E. behriana: almost no info but same series as largiflorens (latter in trait dataset; also populnea and persistens both on thorn tree) (intertexta, orgadophila, sparsa, )(we'll leave the thorn tree memebrs of that series for now since only largiflorens is on the trait dataset)
 
 - E. strzeleckii: no info on APC or Nicolle synonyms but same series as camphora, ovata, yarraensis, cadens aggregata, etc (all but cadens on the thorn tree but first tree on the trait dataset so we'll leave it at that since that's enought to determine monophyly)
 
 - E. carolaniae: no APC info but Nicolle condiers it an intergrade between E. cypellocarpa and E. goniocalyx subsp. goniocalyx (both on tree and trait dataset)
 
-- E. arenicola: no info, same series as willisii, elata, dives, croajingolensis, falciformis, radiata and others but we'll onily keep the ones already on the tree bc they're in the trait dataset bc there's enough there to determine how close they are
+- E. arenicola: no info, same series as willisii, elata, dives, croajingolensis, falciformis, radiata and others but we'll only keep the ones already on the tree bc they're in the trait dataset bc there's enough there to determine how close they are
 
 - E. lehmannii: orthographic variance causing non-match, listed as Eucalyptus lehmanii subsp. lehmanii
 
@@ -460,17 +586,22 @@ For the 17 (these 17 + Syncarpia from the subspecies list that didn't even match
 - E. doratoxylon: no APC info (aside from an obsolete synonym E. microstoma), Nicolle has its only series mate as E. decurva, which is already in the trait dataset so we we may be able to use that tips to place this taxon
   - BUT LO! it is written as E. dorOtoxylon on the thorntree with the o not the official a-form
 
+- E. dendromorpha: unsure of position on the tree as of yet but some close relatives include E. apiculata and E. burgessiana
+
+- E. robusta: unsure of position on the tree as of yet
+
+
 Check names manually to catch orthographic variants:
 
-none on the bayly tree
+None on the bayly tree mis-spelt as they are all current on APC
 
-on the thorn tree:
+Summarising on the thorn tree:
 - lehmannii written as lehmanii on thorn tree (another variant to that listed on APC, lehmanni)
 - doratoxylon written as dorotoxylon on thorn tree
-- (of course there's the instance of E. vergrandis misspelt on the trait dataset spelt correctly on the thorn tree)
+- (of course there's also the instance of E. vergrandis misspelt on the trait dataset but spelt correctly as E. vegrandis on the thorn tree)
 
 
-Hence, of the 18 above (including E. vergrandis):
+Hence, of the 20 above (including E. vergrandis):
 
 - 3 taxa mismatches result from orthographic mistakes or variance
 
@@ -481,51 +612,102 @@ Hence, of the 18 above (including E. vergrandis):
 
 - 2 taxa ara the outgroups Tristaniopsis and Syncarpia, which will require some digging in non-eucalypt literature to determine where they should be (none of the three taxon lists have any outgroups in common so noting where they fall for the trees to be merged after they are merged is not likely to be a reliable method to see how non-eucalypt taxa end up)
 - 5 remaining taxa have other members of their series (as defined by Nicolle 2019) on the trait dataset or the thorntree so can potentially use that
-
+- 2 taxa will be excluded from the tree because their relationships to other taxa are unclear and only a few measurements were taken of them so it's not worth making further assumptions to position them (E. robusta and E. dendromorpha and )
 
 
 Of the three obsolete names in the trait dataset:
-(Already part of subspecies changing) E. cinerea subsp. triplex (current) is in the thorn.tree so will need to be changed back to the obsolete name E. cinerea subsp. victoriensis
+(Already part of subspecies changing) E. cinerea subsp. triplex (current) is in the thorn.tree so will need to be changed back to the obsolete name E. cinerea subsp. victoriensis to match the trait dataset again after trees have been merged (so that trait data will attach correctly)
 
-The new name E. incrassata is on the thorn.tree and so a sister taxon for E. costata subsp. murrayana will need to be added once the trees are done, since E. incrassata is also a separate taxon on the traits dataset.
+The new name E. incrassata is on the thorn.tree and so a sister taxon for E. costata subsp. murrayana will need to be added once the trees are done, since E. incrassata is also a separate taxon on the traits dataset, despite these names being considered synonyms elsewhere.
 
-(already accounted for by above process) For E. decipiens ssp. chalara, the ssp. decipiens is on the thorn.tree but there's no E. adesmophloia between which this is an intergrade so this taxon will likely be added as a sister taxon to the E. decipiens tip.
+(already accounted for by above process) For E. decipiens ssp. chalara, the ssp. decipiens is on the thorn.tree but there's no E. adesmophloia between which this is an intergrade so this taxon will be added as a sister taxon to the E. decipiens tip.
 
-Also remember to also keep E. cuspidata and E. yangoura to see where they fall, though i roughly know where that is anyway, since they are closeish but not sister (to the taxa that are also their current names) and so will likely end up paraphyletic or polyphyletic upon pruning.
+Also remember to keep E. cuspidata and E. yangoura to see where they fall, though I roughly know where that is anyway, since they are close-ish but not sister (to the taxa that are also their current names) and so will likely end up paraphyletic or polyphyletic upon pruning.
+
+Given all of the above species names that will be used to position species based on other members of that same species, we need to determine which extra taxon names (i.e. tips) on the throntree should be kept so that we still have ways of positioning species after we prune down the uneccessary majority of the taxa n the thornhill tree to reduce the computing speed. 
+
+The following list also includes the possible nearest relatives of the remaining taxa that did not have members of the same species on the thornhill tree that could be used to position them.
+
 
 ```{r}
-#extra taxa that we'll keep when we prune down the thorn tree
-extra.taxa.for.keeping <- data.frame('taxon' = c('Eucalyptus yangoura', 'Eucalyptus cuspidata', 'Eucalyptus calycogona subsp. calycogona', 'Eucalyptus cinerea subsp. triplex', 'Eucalyptus tricarpa', 'Eucalyptus camphora subsp. camphora', 'Eucalyptus sideroxylon', 'Eucalyptus alligatrix subsp. alligatrix', 'Eucalyptus baueriana', 'Eucalyptus polyanthemos subsp. polyanthemos', 'Eucalyptus marginata', 'Eucalyptus ligulata subsp. ligulata', 'Eucalyptus decipiens subsp. decipiens', 'Eucalyptus conglobata subsp. conglobata', 'Eucalyptus vegrandis subsp. vegrandis', 'Eucalyptus willisii subsp. willisii', 'Eucalyptus preissiana subsp. preissiana', 'Eucalyptus wandoo subsp. wandoo', 'Eucalyptus xanthonema subsp. xanthonema', 'Eucalyptus uncinata subsp. uncinata', 'Eucalyptus flocktoniae subsp. flocktoniae', 'Eucalyptus pluricaulis subsp. pluricaulis', 'Eucalyptus lehmanii subsp. lehmanii', 'Eucalyptus dorotoxylon', 'Eucalyptus viridis', 'Eucalyptus polybractea', 'Eucalyptus canaliculata', 'Eucalyptus grisea', 'Eucalyptus propinqua', 'Eucalyptus major', 'Eucalyptus populnea', 'Eucalyptus sparsa', 'Eucalyptus brookeriana subsp. brookeriana', 'Eucalyptus apiculata', 'Eucalyptus burgessiana', 'Eucalyptus quadrangulata', 'Eucalyptus microcorys', 'Corymbia intermedia'))
-length(extra.taxa.for.keeping$taxon) #38
-extra.taxa.for.keeping$taxon[!extra.taxa.for.keeping$taxon %in% thorn.tips2$taxon] #good, none now
-extra.taxa.for.keeping$taxon[extra.taxa.for.keeping$taxon %in% all.taxa.clean$taxon] #ashould be none if using original 158 taxa for trait dataset otherwise the final 3 with E. propinqua as well should be in the trait dataset once the new data has been incorporated (so 4)
+# extra taxa that we'll keep when we prune down the thorn tree 
+extra.taxa.for.keeping <- data.frame('taxon' = c('Eucalyptus yangoura', 'Eucalyptus cuspidata', 'Eucalyptus calycogona subsp. calycogona', 'Eucalyptus cinerea subsp. triplex', 'Eucalyptus tricarpa', 'Eucalyptus camphora subsp. camphora', 'Eucalyptus sideroxylon', 'Eucalyptus alligatrix subsp. alligatrix', 'Eucalyptus baueriana', 'Eucalyptus polyanthemos subsp. polyanthemos', 'Eucalyptus marginata', 'Eucalyptus ligulata subsp. ligulata', 'Eucalyptus decipiens subsp. decipiens', 'Eucalyptus conglobata subsp. conglobata', 'Eucalyptus vegrandis subsp. vegrandis', 'Eucalyptus willisii subsp. willisii', 'Eucalyptus preissiana subsp. preissiana', 'Eucalyptus wandoo subsp. wandoo', 'Eucalyptus xanthonema subsp. xanthonema', 'Eucalyptus uncinata subsp. uncinata', 'Eucalyptus flocktoniae subsp. flocktoniae', 'Eucalyptus pluricaulis subsp. pluricaulis', 'Eucalyptus lehmanii subsp. lehmanii', 'Eucalyptus dorotoxylon', 'Eucalyptus viridis', 'Eucalyptus polybractea', 'Eucalyptus canaliculata', 'Eucalyptus grisea', 'Eucalyptus major', 'Eucalyptus populnea', 'Eucalyptus sparsa', 'Eucalyptus brookeriana subsp. brookeriana', 'Eucalyptus apiculata', 'Eucalyptus burgessiana'))
+
+# 34 names should be in this list
+length(extra.taxa.for.keeping$taxon) 
+
+# checking none of the above listed names are spelt wrong and do all match tips on the thornhill tree, should return 'character(0)'
+extra.taxa.for.keeping$taxon[!extra.taxa.for.keeping$taxon %in% thorn.tips2$taxon] 
+
+# making sure non of these names are redundant and allready in the trait dataset, should also return 'character(0)'
+extra.taxa.for.keeping$taxon[extra.taxa.for.keeping$taxon %in% all.taxa.clean$taxon]
 ```
 
-##Final Thornhill
+Other than the species with matches on the trait dataset at species level:
+
+E. lehmanii subsp. lehmanii, E. dorotoxylon, and E. vegrandis subsp. vegrandis were kept as lack of matching was only due to spelling differences
+
+E. viridis and E. polybractea were kept as potential close relatives of E. wimmerensis
+
+E. canaliculata, E. grisea, and E. major were kept as potential close relatives of E. punctata ( in addition to E. propinqua which is already on the trait dataset)
+
+E. populnea and E. sparsa were kept as potential close relatives of E. behriana.
+
+E. brookeriana subsp. brookeriana was kept as as additional potential close relative of E. strzeleckii (in adition to E. yarraensis and E. ovata which allready match trait taxa)
+
+E. apiculata and E. burgessiana were included as potential close relatives of E. dendromorpha (we eventually decide to exclude this taxon)
+
+Final three taxa in the list are already in the trait dataset so can omit but check it first. They were originally a quirk of dataset format and structure and new species suddenly added to the esisting dataset while this code was being written
+
+It is worth noting that there are several other taxa whose positioning will be done later if they are to be included at all: 
+- Outgroups such as Syncarpia glomulifer subsp. glomulifera, Lophostemon confertus, Tristaniopsis laurina
+- E. robusta, E. bunyip, E. carolaniae (taxonomically uncertain relationships)
+
+
+## Final Thornhill
+
+After all checking of names and mismatches causes by differences in taxonomic resolution, spelling variation, or the lack of direct represenatatives of trait taxa on the thornhill tree, we actually prune the thornhill tree down to the smallest st of taxa necessary for our analysis before merging it with the bayly tree.
+
 
 ```{r}
-#first to attach the trait dataset and bayly tree taxa together and extract duplicates
-taxa.for.keeping <- as.data.frame(rbind(all.taxa.clean, bayly.tips)) #197
-taxa.for.keeping.nd <- data.frame('taxon' = taxa.for.keeping[!duplicated(taxa.for.keeping$taxon),]) #184
-taxa.for.keeping$taxon[duplicated(taxa.for.keeping$taxon)] #13 doubled taxa exsting in both bayly tree and trait dataset
-sum(all.taxa.clean$taxon %in% bayly.tips$taxon) #13 so good
-all.taxa.for.keeping <- as.data.frame(rbind(taxa.for.keeping.nd, extra.taxa.for.keeping)) #222
-sum(extra.taxa.for.keeping$taxon %in% bayly.tips$taxon) #3
+# first to attach the trait dataset and bayly tree taxa together and extract duplicates, it should contain 204 names including the duplicates, as we want to make sure none of the taxa on the bayly tree get excluded fromt he pruned thornhill tree even if they're not in the trait dataset
+taxa.for.keeping <- as.data.frame(rbind(all.taxa.clean, bayly.tips))
+## the follow column contains 190 names
+taxa.for.keeping.nd <- data.frame('taxon' = taxa.for.keeping[!duplicated(taxa.for.keeping$taxon),]) 
+## 14 duplicated taxa (existing in both bayly tree and trait dataset)
+taxa.for.keeping$taxon[duplicated(taxa.for.keeping$taxon)] 
+sum(all.taxa.clean$taxon %in% bayly.tips$taxon) 
+# the following should be 224 names long
+all.taxa.for.keeping <- as.data.frame(rbind(taxa.for.keeping.nd, extra.taxa.for.keeping))
+
+# 2 taxa in the extra list were in the bayky tree, marginata and polybractea
+sum(extra.taxa.for.keeping$taxon %in% bayly.tips$taxon) 
+extra.taxa.for.keeping[extra.taxa.for.keeping$taxon %in% bayly.tips$taxon,]
+
+# checking again for no redundancy or spelling mistakes, should show none and all 34 of them respectively
 sum(extra.taxa.for.keeping$taxon %in% all.taxa.clean$taxon) #none, good
-#extra.taxa.for.keeping[extra.taxa.for.keeping$taxon %in% bayly.tips$taxon,]
 sum(extra.taxa.for.keeping$taxon %in% thorn.tips2$taxon) #all, good
-all.taxa.for.keeping.clean <- data.frame('taxon' = all.taxa.for.keeping[!duplicated(all.taxa.for.keeping$taxon),]) #219
-all.taxa.for.keeping$taxon[duplicated(all.taxa.for.keeping$taxon)] #those 3 in both bayly and extra taxa
-#extra.taxa.for.keeping$taxon[extra.taxa.for.keeping$taxon %in% bayly.tips$taxon]
-sum(!all.taxa.for.keeping.clean$taxon %in% thorn.tips2$taxon) #full list has an extra 2 that don't match bc the two outgroups of the bayly tree don't match
-sum(!all.taxa.clean$taxon %in% thorn.tips2$taxon) #has two lees bc missing the two mismatches from the bayly outgroups
+
+# without duplicates this should be 222 names long, after we get rid of E. marginata and polybractea
+all.taxa.for.keeping.clean <- data.frame('taxon' = all.taxa.for.keeping[!duplicated(all.taxa.for.keeping$taxon),])
+all.taxa.for.keeping$taxon[duplicated(all.taxa.for.keeping$taxon)] 
+# bayly tips added an extra 2 outgroup taxa to this list of taxa that don't match any tips in the thornhill tree, the latter line should read 62 as it was originally
+sum(!all.taxa.for.keeping.clean$taxon %in% thorn.tips2$taxon)
+sum(!all.taxa.clean$taxon %in% thorn.tips2$taxon) 
+
+# testing which taxa in the above list are not in the thornhill tree
 atfk.test <- data.frame('taxon'= all.taxa.for.keeping.clean$taxon[!all.taxa.for.keeping.clean$taxon %in% thorn.tips2$taxon])
+# compared with the taxa in the trait dataset 
 atc.test <- data.frame('taxon' = all.taxa.clean$taxon[!all.taxa.clean$taxon %in% thorn.tips2$taxon])
+# shows that the two extra taxa that now also don't match the thornhill tree indeed come from the bayly tree outgroups
 atfk.test$taxon[!atfk.test$taxon %in% atc.test$taxon]
+atfk.test$taxon[!atfk.test$taxon %in% non.matching.trait.taxa2$taxon]
+
+# there are 222 names currently in this list of trait taxa + the species we will use to position most of those that don't have a direct match
 length(all.taxa.for.keeping.clean$taxon)
 
-sum(!all.taxa.for.keeping.clean$taxon %in% thorn.tree$tip.label) #61 so good and there are 158 that do match (some of which are just extra and more than 1 for some taxa so dont look at the numbers too much here)
-sum(thorn.tree$tip.label %in% all.taxa.for.keeping.clean$taxon) #158 so good
+# 158 taxa of these 222 (222-64) match a tip on the thornhill tree
+sum(all.taxa.for.keeping.clean$taxon %in% thorn.tips2$taxon)
 ```
 
 
@@ -533,44 +715,73 @@ sum(thorn.tree$tip.label %in% all.taxa.for.keeping.clean$taxon) #158 so good
 Now to prune the Thornhill Tree:
 
 ```{r fig.height=25, fig.width=15}
+# only keep tips on thornhill tree that are in the above list
 thorn.tree.pruned <- keep.tip(thorn.tree, thorn.tree$tip.label[thorn.tree$tip.label %in% all.taxa.for.keeping.clean$taxon])
-length(thorn.tree.pruned$tip.label) #158 good
+
+# check the number of tips is in fact the 158 we expect
+length(thorn.tree.pruned$tip.label)
+
+# removes branch lengths on the tree in preparation to combine it with the bayly tree that likely uses a different root age and possibly also units for branch length
 thorn.tree.pruned$edge.length <- NULL
 plot_dim1(thorn.tree.pruned)
-plot_dim1(bayly.tree)
+ggsave(ggtree(thorn.tree.pruned) + xlim(0, 45) + geom_tiplab(size=7), file = "../Output_figures/thorn_tree_pruned.pdf", width = 15, height=45)
+
+# removed branch length from the bayly tree as well
 bayly.tree$edge.length <- NULL
-#plot_dim1(bayly.tree)
-ggsave(ggtree(bayly.tree) + xlim(0, 20) + geom_tiplab(size=10, offset = 0), file = "Output_figures/bayly_tree.pdf", width = 15, height=30)
-ggsave(ggtree(thorn.tree.pruned) + xlim(0, 45) + geom_tiplab(size=7), file = "Output_figures/thorn_tree_pruned.pdf", width = 15, height=45)
+plot_dim1(bayly.tree)
+ggsave(ggtree(bayly.tree) + xlim(0, 20) + geom_tiplab(size=10, offset = 0), file = "../Output_figures/bayly_tree.pdf", width = 15, height=30)
 ```
 
 
 ## Merging Trees into Supertree
 
+Here we use Supertree methods to merge the Bayly et al. (2013) tree with the (somewhat pruned) Thornhill et al. (2019) tree, which allows combination and 'consensus' between phylogenies of only partially overlapping taxa. Below, we use the Matrix Represenatation Parsimony method for choosing the best output tree.
+
 ```{r fig.height=25, fig.width=15}
+# vector of the two tree objects to be merged
 trees.for.merging <- c(thorn.tree.pruned, bayly.tree)
 
-set.seed(1) #to make sure that the trees we get are reproducible
+# to make sure that the trees we get are reproducible we need to set a seed for the random component of how the supertree function resolves relationships in the regions of uncertainty
+set.seed(1) 
+# here we are using one of 2 functions that merges the trees 100 times and stores each of the 100 outputs as single entries in a list
 consensus.trees100 <- replicate_supertree2(trees.for.merging, 100)
 trees100 <-lapply(consensus.trees100, write.tree)
-con.tree3.100 <-consensus(consensus.trees100, p= 0.5, check.labels = TRUE)
-con.tree.strict <- consensus(consensus.trees100, p=1, check.labels = TRUE)
-# plot(ggtree(con.tree3.100) + xlim(0, 35) + geom_tiplab(size=5))
-# plot(ggtree(con.tree.strict) + xlim(0, 35) + geom_tiplab(size=5))
-ggsave(ggtree(con.tree3.100) + xlim(0, 45) + geom_tiplab(size=5), file = "Output_figures/majrule_tree3_100.pdf", width = 15, height=45)
-ggsave(ggtree(con.tree.strict) + xlim(0, 40) + geom_tiplab(size=5), file = "Output_figures/strict_tree3_100.pdf", width = 15, height=45)
 
-plot(ggtree(con.tree3.100) + xlim(0, 40) + geom_tiplab(size=5))
-plot(ggtree(con.tree.strict) + xlim(0, 40) + geom_tiplab(size=5)) #there is some difference especially in the moncalypts and radiatae series between the majority rules ns strict consensus trees
+# nice to have a look at what each of these trees look like and what the differences between them are, difficult to do in the Rmarkdown but a bit easier in pdf
+pdf("../Output_figures/individual_trees_for_consensus.pdf", height = 45, width = 15)
+for (i in 1:100){
+  plot_dim1(consensus.trees100[[i]])
+}
+dev.off()
+
+# now we take the majority rules consensus of the 100 resulting supertrees to only keep the nodes found in at least 50% of the trees. This should help collapse nodes that are artefacts of the random resolution of uncertain parts of the tree
+con.tree.majrule <-consensus(consensus.trees100, p= 0.5, check.labels = TRUE, rooted = TRUE)
+# this is a strict consensus, only containing the nodes found in every output supertree
+con.tree.strict <- consensus(consensus.trees100, p=1, check.labels = TRUE, rooted = TRUE)
+
+# for the majority rules consensus tree
+plot_dim1(con.tree.majrule)
+ggsave(ggtree(con.tree.majrule) + xlim(0, 45) + geom_tiplab(size=5), file = "../Output_figures/majrule_tree_100.pdf", width = 15, height=45)
+
+# for the strict consensus tree
+plot_dim1(con.tree.strict)
+ggsave(ggtree(con.tree.strict) + xlim(0, 40) + geom_tiplab(size=5), file = "../Output_figures/strict_tree_100.pdf", width = 15, height=45)
 ```
 
-### Renaming and Finalising Tree
+Some differences between majority rules and strict consensus trees can be seen in the Monocalypt clade and expecially in the Radiatae series, though the general topology is the same. However, we have decided to use the strict consensus tree as the basis to which we will add species as this is the more conservative choice and it is still sufficiently resolved for our purposes.
+
+
+### Renaming Known Tips
 
 Now to edit the strict consensus tree so that the near-matched names match the trait dataset and extra subspecies can be added:
 
 ```{r fig.height=30, fig.width=15}
-#starting with the tips corresponding to near-matching subspecies taxa in the traits dataset
+# starting with the tips corresponding to near-matching subspecies taxa in the traits dataset
 merged.tree <- con.tree.strict
+## getting rid of some erroneous node labels now that seem to interfere with the comparitive object in script 3 later
+merged.tree$node.label <- NULL 
+
+## first lets deal with the 6 aforementioned taxa from lines 342-348 and 412-419
 merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus camaldulensis"] <- 'Eucalyptus camaldulensis subsp. camaldulensis'
 
 globulus.clade <- read.tree(text = "((Eucalyptus_globulus_subsp._globulus, Eucalyptus_globulus_subsp._bicostata, Eucalyptus_globulus_subsp._pseudoglobulus, Eucalyptus_globulus_subsp._maidenii));")
@@ -585,6 +796,8 @@ merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus marginata"] <- 'Eucal
 
 merged.tree$tip.label[merged.tree$tip.label == "Angophora costata"] <- 'Angophora costata subsp. costata'
 
+
+## now for the rest of the trait taxa with subspecies epithets but species-level matches on the thornhill tree (lines 451-468)
 pauciflora.clade <- read.tree(text = "(Eucalyptus_pauciflora_subsp._pauciflora, Eucalyptus_pauciflora_subsp._acerina, Eucalyptus_pauciflora_subsp._parvifructa, Eucalyptus_pauciflora_subsp._debeuzevillei, Eucalyptus_pauciflora_subsp._niphophila, Eucalyptus_pauciflora_subsp._hedraia);")
 merged.tree <- replace_tip(merged.tree, "Eucalyptus pauciflora subsp. pauciflora", pauciflora.clade)
 
@@ -621,31 +834,27 @@ decipiens.clade <- read.tree(text = "(Eucalyptus_decipiens, Eucalyptus_decipiens
 merged.tree <- replace_tip(merged.tree, "Eucalyptus decipiens subsp. decipiens", decipiens.clade)
 
 merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus conglobata subsp. conglobata"] <- 'Eucalyptus conglobata subsp. perata'
-
-plot(ggtree(merged.tree) + xlim(0, 40) + geom_tiplab(size=5))
 ```
 
-```{r fig.height=25, fig.width=15}
-#now for the near-matched species-only traits taxa with members of the same species on the thorntree
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus willisii subsp. willisii"] <- 'Eucalyptus willisii'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus preissiana subsp. preissiana"] <- 'Eucalyptus preissiana'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus wandoo subsp. wandoo"] <- 'Eucalyptus wandoo'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus xanthonema subsp. xanthonema"] <- 'Eucalyptus xanthonema'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus uncinata subsp. uncinata"] <- 'Eucalyptus uncinata'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus flocktoniae subsp. flocktoniae"] <- 'Eucalyptus flocktoniae'
-# merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus pluricaulis subsp. pluricaulis"] <- 'Eucalyptus pluricaulis'
 
-#or could be more efficient and simply sub-out the last bit all at once
+
+```{r fig.height=25, fig.width=15}
+#now for the near-matched species-only traits taxa with members of the same species on the thorntree (lines 489-496)
 sspp.to.spp <- c("Eucalyptus willisii subsp. willisii", "Eucalyptus preissiana subsp. preissiana", "Eucalyptus wandoo subsp. wandoo", "Eucalyptus xanthonema subsp. xanthonema", "Eucalyptus uncinata subsp. uncinata", "Eucalyptus flocktoniae subsp. flocktoniae", "Eucalyptus pluricaulis subsp. pluricaulis")
-sspp.to.spp[sspp.to.spp %in% merged.tree$tip.label] #good all recognised
+## checking that all of these are recognised and match tips with no spelling mistakes, hence all 7 names should be in this list
+sspp.to.spp[sspp.to.spp %in% merged.tree$tip.label] 
+
+# substituting out everything after the subsp. word for the species in the above list
 merged.tree$tip.label[merged.tree$tip.label %in% sspp.to.spp] <- sub(" subsp..+$", "", merged.tree$tip.label[merged.tree$tip.label %in% sspp.to.spp])
+# getting rid of pesky underscores
 merged.tree$tip.label <- gsub("_", " ", merged.tree$tip.label)
 ```
 
-Now to handle those of the 18 mismatches that we have agreed solutions for:
+
+Now to handle those of the 22 mismatches left that we have agreed solutions for:
 
 ```{r}
-#orthographic variants or mistakes
+# orthographic variants or mistakes
 merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus vegrandis subsp. vegrandis"] <- 'Eucalyptus vergrandis'
 merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus lehmanii subsp. lehmanii"] <- 'Eucalyptus lehmannii'
 merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus dorotoxylon"] <- 'Eucalyptus doratoxylon'
@@ -653,7 +862,7 @@ merged.tree$tip.label[merged.tree$tip.label == "Eucalyptus dorotoxylon"] <- 'Euc
 
 
 ```{r}
-#the rule-taxa with basionyms that were sister subspecies to other taxa on the tree
+# the rule-taxa with basionyms that were sister subspecies to other taxa on the tree (and hence are using the species they used to be taxonomically treated as subspecies to taxa existing on the tree)
 falciformis.clade <- read.tree(text = "(Eucalyptus_falciformis, Eucalyptus_willisii);")
 merged.tree <- replace_tip(merged.tree, "Eucalyptus willisii", falciformis.clade)
 
@@ -665,15 +874,20 @@ merged.tree <- replace_tip(merged.tree, "Eucalyptus racemosa", rossii.clade)
 
 merged.tree$tip.label <- gsub("_", " ", merged.tree$tip.label)
 
-all.taxa.clean$taxon[!all.taxa.clean$taxon %in% merged.tree$tip.label] #once E. costata subsp. murrayana is dealt with (below) then there are only the 15 taxa (10 plus the two outgroups + 3 additional taxa not yet placed at this stage)
+all.taxa.clean$taxon[!all.taxa.clean$taxon %in% merged.tree$tip.label] #once E. costata subsp. murrayana is dealt with (below) then there are only the 15 taxa (10 plus the 3 outgroup taxa + 2 taxa we are about to place)
 ```
+
+### Which close relatives to use to placer remaining taxa?
 
 See what euclid says about the other 10 taxa that aren't outgroups or newly added taxa:
 
-E. wimmerensis (only synonym E. viridis subsp. wimmerensis listed as vicflora synonym, very much a Rule-taxon), 
-E. silvestris (Rule-taxon and considered by VicFlora to be somewhat intermediate between E. microcarpa and E. wimmerensis, also considered to be a depauperate but distinguishable form of E. microcarpa),
-and E. carolaniae (vicflora has it having a synonym of E. aff. cypellocarpa (Mornington Peninsula) so maybe its closer to E. cypellocarpa than it is to E. goniocalyx and an be positioned accordingly) are nowhere to be found on Euclid and E. bunyip (VicFlora has no synonyms listed, it is a Rule taxon, but E. strzeleckii and E. camphora are noted as taxa it can be distinguished from) is noted as a synonym but not considered distinct enough to be included in EUCLID.
+E. wimmerensis (only synonym E. viridis subsp. wimmerensis listed as vicflora synonym, very much a Rule-taxon) (Rule was a taxonomist particularly fond of splitting groups into separate species where many other would not have done so), 
 
+E. silvestris (Rule-taxon and considered by VicFlora to be somewhat intermediate between E. microcarpa and E. wimmerensis, also considered to be a depauperate but distinguishable form of E. microcarpa),
+and;
+E. carolaniae (vicflora has it having a synonym of E. aff. cypellocarpa (Mornington Peninsula) so maybe its closer to E. cypellocarpa than it is to E. goniocalyx and can be positioned accordingly) are nowhere to be found on Euclid and;
+
+E. bunyip (VicFlora has no synonyms listed, it is a Rule taxon, but E. strzeleckii and E. camphora are noted as taxa it can be distinguished from) is noted as a synonym but not considered distinct enough to be included in EUCLID.
 
 
 E. punctata has closest relatives, some of which are on the thornhill tree:
@@ -688,17 +902,18 @@ which(thorn.tree$tip.label == "Eucalyptus grisea")
 which(thorn.tree$tip.label == "Eucalyptus propinqua")
 which(thorn.tree$tip.label == "Eucalyptus major")
 ```
-Hence, they are relatively close on the thornhill tree to begin with and so it is likely they may even become sister to each other after it is pruned
+
+They are relatively close on the thornhill tree to begin with and so it is likely they may even become sister to each other after it is pruned.
 
 
-Where was E. punctata collected?
+Where was E. punctata collected? Maybe I can use which of these relatives might be collected in a similar area.
 
 ```{r}
-#full.se[full.se$taxon == "Eucalyptus punctata", c("locality")]
+unique(combined_traits[combined_traits$taxon == "Eucalyptus punctata", c("locality")])
 ```
 
+Samples were collected at the very southern tip of this species range, just south of Sydney and not far inland. Doesn't immediately make one of these close relatives seem more representative than the others because, although it knocks out E. grisea and E. major (both restricted to QLD), it could still be either E. canaliculata or E. propinqua, which are still in slightly different places on the tree.
 
-Samples were collected at the very southern tip of this species range, just south of Sydney and not far inland.
 
 E. imitans a close relative of E. baxteri, which is on the traits dataset and already in the tree!
 
@@ -707,20 +922,19 @@ E. chapmaniana does not have any close relatives mentioned beyond how to tell it
 E. behriana has close relatives E. populnea and E. sparsa (eastern and central australia repsectively). Can potentially say our sample is more likely to be closer to E. populnea based on the range in which it was collected (which was in SE Vic, Long Forest)
 
 ```{r}
-# which(thorn.tree$tip.label == "Eucalyptus populnea")
-# which(thorn.tree$tip.label == "Eucalyptus sparsa")
-# #yeah very much that near each other
-# 
-# full.se[full.se$taxon == 'Eucalyptus behriana', c('locality')]
+# checking how close together these close relatives of E. behriana are, they appear quite far from one another. Also, it appears that tip label number is not always in the order they appear when the tree is plotted so we can also verify how far away these taxa are by loking t the pdf of the thornhill tree, which confirms it
+which(thorn.tree$tip.label == "Eucalyptus populnea")
+which(thorn.tree$tip.label == "Eucalyptus sparsa")
+
+# now to look at where our amples of E. behriana were collected to see if that sheds any light on the matter
+unique(combined_traits[combined_traits$taxon == 'Eucalyptus behriana', c('locality')])
 ```
 
-E. strzeleckii closest to E. yarraensis, E. ovata and E. brookeriana (latter has its autonym ssp. on the thornhill tree)
+E. strzeleckii closest to E. yarraensis, E. ovata and E. brookeriana (latter has its autonym ssp. on the thornhill tree and the other are allready on the tree)
 
 E. arenicola was once considered part of E. willisii subsp. willisii so can probably be placed as such nested within it or, more conservatively, as a polytomy with E. falciformis as well.
 
-
-
-Now to add the extra 2 (that EUCLID named the closest relative of) accordingly:
+Now to add the 2 (that EUCLID named the closest relative of) accordingly:
 
 ```{r}
 imitans.clade <- read.tree(text = "(Eucalyptus_imitans, Eucalyptus_baxteri);")
@@ -732,7 +946,7 @@ merged.tree <- drop.tip(merged.tree, c("Eucalyptus falciformis"))
 ```
 
 
-Now also to remember to add E. costata murrayana as a sister taxon to E. incrassata, since Nicolle treats them as a single taxon, though APC considers them to both be current names.
+Now also to remember to add E. costata murrayana as a sister taxon to E. incrassata, since Nicolle treats them as a single taxon indicating they are likely closer to each other than they are to other taxa, though APC considers them to both be current names.
 
 ```{r}
 murrayana.clade <- read.tree(text = "(Eucalyptus_incrassata, Eucalyptus_costata_subsp._murrayana);")
@@ -741,16 +955,19 @@ merged.tree$tip.label <- gsub("_", " ", merged.tree$tip.label)
 ```
 
 
-Now that we know what to keep as potential placeholders for these other 8 non-outgroup taxa, we can prune away the unecessary bayly species that aren't in the trait dataset:
+Now that we know what to keep as potential placeholders for these other 10 non-outgroup taxa (E. punctata - 1st 4, E. wimmerensis - next 2, E. silvestris - relative of E. wimmerensis and E. microcarpa latter on the tree allready, E. behriana - next 2, E. strzeleckii - E. brookeriana sp., E. dendromorpha - last 2 before outgroup, E. chapmaniana, E. robusta, E. carolaniae, E. bunyip - these last 4 we're not sure where to put them yet), we can prune away the unecessary bayly species that aren't in the trait dataset. Note we keep one of the outgroups on the tree to help position our outgroups on an existing node.
 
 ```{r fig.height=30, fig.width=15}
-extra.taxa.for.keeping2 <- data.frame("taxon" = c("Eucalyptus canaliculata", "Eucalyptus grisea", "Eucalyptus propinqua", "Eucalyptus major", "Eucalyptus viridis", "Eucalyptus polybractea", "Eucalyptus populnea", "Eucalyptus sparsa", "Eucalyptus brookeriana subsp. brookeriana", "Stockwellia quadrifida", "Eucalyptus apiculata", "Eucalyptus burgessiana", "Corymbia intermedia", "Eucalyptus quadrangulata", "Eucalyptus microcorys"))
-extra.taxa.for.keeping2[!extra.taxa.for.keeping2$taxon %in% merged.tree$tip.label,] #none so good
+extra.taxa.for.keeping2 <- data.frame("taxon" = c("Eucalyptus canaliculata", "Eucalyptus grisea", "Eucalyptus major", "Eucalyptus viridis", "Eucalyptus polybractea", "Eucalyptus populnea", "Eucalyptus sparsa", "Eucalyptus brookeriana subsp. brookeriana", "Eucalyptus apiculata", "Eucalyptus burgessiana", "Stockwellia quadrifida"))
+# just checking the list above has no spelling mistakes and they're all on the taxon list for the current growing tree we're working with
+extra.taxa.for.keeping2[!extra.taxa.for.keeping2$taxon %in% merged.tree$tip.label,]
 
 merged.tree$tip.label <- gsub("_", " ", merged.tree$tip.label)
 taxa.for.keeping2 <- data.frame("taxon" = rbind(all.taxa.clean, extra.taxa.for.keeping2))
-sum(duplicated(taxa.for.keeping2$taxon)) #good none
+# checking there are no duplicates, there appears to be none
+sum(duplicated(taxa.for.keeping2$taxon))
 
+# now to prune away all the close relative we kept on the thornhill tree that we know we are no longer going to be using as we've narrowed some of them down. Note: taxa that had a match at species level on th thornhill tree have at this point been changed to match the version of the name that is in the trait dataset, hence why all the taxa we need are in the taxa.for.keeping2 object with the trait dataset list plus the much smaller list of close relatives.
 merged.pruned.tree <- keep.tip(merged.tree, merged.tree$tip.label[merged.tree$tip.label %in% taxa.for.keeping2$taxon])
 
 merged.pruned.tree$tip.label[merged.pruned.tree$tip.label == "Stockwellia quadrifida"] <- "Syncarpia glomulifera subsp. glomulifera"
@@ -758,61 +975,61 @@ plot_dim1(merged.pruned.tree)
 ```
 
 
-
-Also, according to Thornhill, tribes Leptospermeae and chameliauciae are closest to Eucalypteae followed by Syncarpiae. Tristaniopsis and Lophostemon are in their own different tribes so of these three aforementioned tribes, only the Syncarpiae will have a member that we have data for and can be an outgroup sister to the eucalypteae. Hence, that can help us resolve the basal node of the tree by placing non-syncarpiae taxa as outgroups to the clade: (Syncapia + (Angophora + Corymbia + Eucalyptus)). None of the outgroups on the Thornhill or bayly trees are members of any of these other tribes so they can't be used for any positioning.
+Also, according to Thornhill, tribes Leptospermeae and Chameliauciae are closest to Eucalypteae followed by Syncarpiae. Tristaniopsis and Lophostemon are in their own different tribes so of these three aforementioned tribes that are actually closest to Eucalypts, only the Syncarpiae will have a member that we have data for and can be the closest outgroup. Hence, that can help us resolve the basal node of the tree by placing non-syncarpiae taxa as outgroups to the clade: (Syncapia + (Angophora + Corymbia + Eucalyptus)). None of the outgroups on the Thornhill or bayly trees are members of any of these other tribes so they can't be used for any positioning either.
+Also, Lophostemon has been chosen to be the most preferable outgroup of the remaining two non-Syncarpia outgroup taxa due to Tristaniopsis having only a single relatively small individual measured and so we have better data for Lophostemon confertus and will use that as the outgroup instead.
 
 ```{r fig.height=30, fig.width=15}
-#Now to organise the outgroups with Syncarpia as the nearest non-eucalypt taxon
-#write.tree(merged.pruned.tree)
-final.tree1 <- read.tree(text = "((Tristaniopsis_laurina,Syncarpia_glomulifera_subsp._glomulifera));")
+# Now to organise the outgroups with Syncarpia as the nearest non-eucalypt taxon
+## creates a tree of two taxa with new outgroup to be added and the outermost outgroup on the current tree so the function knows where to attach the extra taxon
+final.tree1 <- read.tree(text = "((Lophostemon_confertus, Syncarpia_glomulifera_subsp._glomulifera));")
+## sets root edge of the larger prined merged tree to 0 so the binding wors properly
 merged.pruned.tree$root.edge <- 0
+## binds the smaller tree as the new outermost outgroup to the tree but binds both the the desired additional taxon and the one used to guide the position of binding so now there are duplicates of the latter taxon
 final.tree1 <- bind.tree(final.tree1, merged.pruned.tree, where = 'root')
+## removing the duplicate taxon, which we can identify because the newly added taxa have underscores whereas the taxa from the larger pruned merged tree all had spaces a separators
 final.tree1 <- drop.tip(final.tree1, c("Syncarpia_glomulifera_subsp._glomulifera"))
+## now to remove the underscores
 final.tree1$tip.label <- gsub("_", " ", final.tree1$tip.label)
 plot_dim1(final.tree1)
 
-#ggsave(plot_dim1(final.tree1), file = "final_tree1.pdf", width = 15, height = 45)
+# to annotate the possibilities
+pdf("../Output_figures/final_tree_1_for_annotation.pdf", width = 20, height=45)
+plot_dim1(final.tree1)
+dev.off()
 ```
-
-In terms of any additional taxa being added from additional data and measurements
--Most were already in the traits dataset
--A couple (including Eucalyptus quadrangulata and potentially E. propinqua as well, are new to the dataset but in the Thornhill tree)
--Only one of them was not on the Thornhill tree:
-  - E. dendromorpha (4/5 closest relatives on the thornhill tree)
   
   
   
 ### Testing Placement Effects   
 
-So, at this point there are E. punctata (either next to propinqua or next to the more nested one of the other group), E. behriana that we will placed in various combination to see if it changes the answers.
+So, at this point there are E. punctata (either next to propinqua or next to the more nested one of the other group), E. behriana that we will place in various combinations to see if it changes phylogenetic signal or some correlations we know to be sensitive to phylogenetic signal.
 Should we also do that with a few others such as E. dendromorpha (4 possible positions that are all different), E. wimmerensis (2 possible positions), E. silvestris (near wimmerensis or E. microcarpa), E. carolaniae (either near cypellocarpa or near goniocalyx), E. bunyip (near camphora subsp. humeana or near strzeleckii), E. strzeleckii (near one of the peppermints; ovata, yarraensis, brookeriana)
 
 Also note which of these, if any, have extreme values for traits:
-E. behriana has rather low values for reproductive traits but rather high stem density so can skew phylo-signal prbably the most 
-E. punctata mostly intermediately-valued
-E. wimmerensis has very small leaves, but intermediate SLA and missing data
-E. silvestris has somehwhat low values for most traits but not particularly extreme
-E. carolaniae has quite large leaves, though intermediate everyting else
-E. bunyip has quite small reproductive characteristics but larger in everything else
-
+E. behriana has rather low values for reproductive traits but rather high stem density so can skew phylo-signal probably the most 
+E. punctata mostly intermediately-valued (unlikely to cause great fluctuations in phylogenetic signal based on where it is positioned)
+E. wimmerensis has very small leaves, but intermediate SLA and missing data for most of the remaining traits
+E. silvestris has somehwhat low values for most traits but not particularly extreme values for them
+E. carolaniae has quite large leaves, though intermediate everything else
+E. bunyip has quite small reproductive characteristics but larger in everything else. This taxon might also be more problematic however, since one its close relatives is itself a taxon we are somewhat unsure of so it may not be worth compounding the errors.
 E. strzeleckii has biggish leaf-traits and very small reproductive ones
 E. chapmaniana has some large leaves in there
+E. dendromorpha has relatively intermediate trait values, however there are no reproductive traits for this species recorded at all and only 2 individuals were measured for the remaining traits so we're not including this species as the extra uncertainty from inferring its position is likely greater than the gain of having an extra data point for analysis.
 
-Since, we're not sure if we yet have the data for E. dendromorpha just yet:
-- behriana next to largiflorens vs . next to populnea (sparsa isn't that far from populnea anyway so I can probabaly leave that one)
-- wimmerensis (either next to viridis vs next to polybractea)
-- silvestris next to wimmerensis and microcarpa (whch is sister to polybractea anyway) or not at all
+Hence, some combinations most useful to try:
+- behriana next to largiflorens vs. next to populnea (sparsa isn't that far from populnea anyway so I can probabaly leave that one)
+- wimmerensis (either next to viridis vs. next to polybractea)
+- silvestris next to wimmerensis and microcarpa (which is sister to polybractea anyway) or not at all 
 - punctata (either next to propinqua or next to the nested one; keep behriana variable but have the others either both included or no silvestris)
 
 ```{r fig.height=30, fig.width=15}
-#for the first combination:
+# for the first combination:
   #behriana-largiflorens and wimmerensis-polybractea
 behriana.clade1 <- read.tree(text = "(Eucalyptus_behriana, Eucalyptus_largiflorens);")
 pot.tree1 <- replace_tip(final.tree1, "Eucalyptus largiflorens", behriana.clade1)
 wimm.clade1 <- read.tree(text = "(Eucalyptus_polybractea, Eucalyptus_wimmerensis);")
 pot.tree1 <- replace_tip(pot.tree1, "Eucalyptus polybractea", wimm.clade1)
 pot.tree1$tip.label <- gsub("_", " ", pot.tree1$tip.label)
-plot_dim1(pot.tree1)
 
 #for behriana-largiflorens and wimmerensis-viridis
 pot.tree2 <- replace_tip(final.tree1, "Eucalyptus largiflorens", behriana.clade1)
@@ -831,139 +1048,118 @@ pot.tree4 <- replace_tip(final.tree1, "Eucalyptus populnea", behriana.clade2)
 pot.tree4 <- replace_tip(pot.tree4, "Eucalyptus viridis", wimm.clade2)
 pot.tree4$tip.label <- gsub("_", " ", pot.tree4$tip.label)
 
-# plot_dim1(pot.tree1)
-# plot_dim1(pot.tree2)
-# plot_dim1(pot.tree3)
-# plot_dim1(pot.tree4)
-# plot_dim1_nl(pot.tree1)
-
 #for silvestris added onto where wimmerensis is with behriana with largiflorens
 silvestris.clade <- read.tree(text = "(Eucalyptus_silvestris, Eucalyptus_wimmerensis, Eucalyptus_microcarpa);")
 pot.tree5 <- replace_clade(pot.tree1, 'Eucalyptus wimmerensis', 'Eucalyptus microcarpa', silvestris.clade)
 pot.tree5$tip.label <- gsub("_", " ", pot.tree5$tip.label)
-plot_dim1(pot.tree5)
 
 #for silvestris and wimmerensis in the same place but behriana with populnea
 pot.tree6 <- replace_clade(pot.tree3, "Eucalyptus wimmerensis", "Eucalyptus microcarpa", silvestris.clade)
 pot.tree6$tip.label <- gsub("_", " ", pot.tree6$tip.label)
-plot_dim1(pot.tree6)
 
 #for adding in punctata next to propinqua but behriana-largiflorens
 punctata.clade1 <- read.tree(text = "(Eucalyptus_propinqua, Eucalyptus_punctata);")
 pot.tree7 <- replace_tip(pot.tree1, "Eucalyptus propinqua", punctata.clade1)
 pot.tree7$tip.label <- gsub("_", " ", pot.tree7$tip.label)
-plot_dim1(pot.tree7)
 
 #for adding punctata next to canaliculata but behriana-largiflorens
 punctata.clade2 <- read.tree(text = "(Eucalyptus_canaliculata, Eucalyptus_punctata);")
 pot.tree8 <- replace_tip(pot.tree1, 'Eucalyptus canaliculata', punctata.clade2)
 pot.tree8$tip.label <- gsub("_", " ", pot.tree8$tip.label)
-plot_dim1(pot.tree8)
 
 #for adding punctata-propinqua but behriana-populnea
 pot.tree9 <- replace_tip(pot.tree3, 'Eucalyptus propinqua', punctata.clade1)
 pot.tree9$tip.label <- gsub("_", " ", pot.tree9$tip.label)
-plot_dim1(pot.tree9)
+
 #for adding punctata-canaliculata but behriana-populnea
 pot.tree10 <- replace_tip(pot.tree3, "Eucalyptus canaliculata", punctata.clade2)
 pot.tree10$tip.label <- gsub("_", " ", pot.tree10$tip.label)
-plot_dim1(pot.tree10)
 
 #for tree without behriana (keep wimmerensis and punctata and silvestris)
 pot.tree11 <- pot.tree5 <- replace_clade(pot.tree9, 'Eucalyptus wimmerensis', 'Eucalyptus microcarpa', silvestris.clade)
 pot.tree11 <- drop.tip(pot.tree11, "Eucalyptus behriana")
-plot_dim1(pot.tree11)
 
 #for the entire null tree
 pot.null <- final.tree1
-plot_dim1(pot.null)
+
+# need to add an extra 2 trees adding E. chapmaniana, E. strzeleckii, and E. carolaniae. Lets try one with all three species in thir root-most possible positions, then the other with E. strzeleckii at its tip-most position next to E. ovata and E. chapmaniana at E. glaucescens and no carolaniae at all
+strzeleckii_clade1 <- read.tree(text = "(Eucalyptus_yarraensis, Eucalyptus_strzeleckii);")
+strzeleckii_clade2 <- read.tree(text = "(Eucalyptus_ovata_var._ovata, Eucalyptus_strzeleckii);")
+carolaniae_clade <- read.tree(text = '(Eucalyptus_goniocalyx_subsp._goniocalyx, Eucalyptus_carolaniae);')
+chapmaniana_clade1 <- read.tree(text = '(Eucalyptus_smithii, Eucalyptus_chapmaniana);')
+chapmaniana_clade2 <- read.tree(text = '(Eucalyptus_glaucescens,  Eucalyptus_chapmaniana);')
+
+pot.tree12 <- replace_tip(pot.null, 'Eucalyptus yarraensis', strzeleckii_clade1)
+pot.tree12 <- replace_tip(pot.tree12, 'Eucalyptus smithii', chapmaniana_clade1)
+pot.tree12 <- replace_tip(pot.tree12, 'Eucalyptus goniocalyx subsp. goniocalyx', carolaniae_clade)
+pot.tree12$tip.label <- gsub("_", " ", pot.tree12$tip.label)
+
+pot.tree13 <- replace_tip(pot.null, 'Eucalyptus ovata var. ovata', strzeleckii_clade2)
+pot.tree13 <- replace_tip(pot.tree13, 'Eucalyptus glaucescens', chapmaniana_clade2)
+pot.tree13$tip.label <- gsub("_", " ", pot.tree13$tip.label)
 
 #for behriana next to sparsa
 behriana.clade3 <- read.tree(text = "(Eucalyptus_behriana, Eucalyptus_sparsa);")
-pot.tree15 <- replace_tip(pot.tree5, "Eucalyptus sparsa", behriana.clade3)
-pot.tree15 <- drop.tip(pot.tree15, c("Eucalyptus behriana"))
-pot.tree15$tip.label <- gsub("_", " ", pot.tree15$tip.label)
-plot_dim1(pot.tree15)
+## need to get rid of the previous E. behriana already on pot.tree5 (next to populnea)
+pot.tree14 <- drop.tip(pot.tree5, which(pot.tree5$tip.label == 'Eucalyptus behriana'))
+pot.tree14 <- replace_tip(pot.tree14, "Eucalyptus sparsa", behriana.clade3)
+pot.tree14$tip.label <- gsub("_", " ", pot.tree14$tip.label)
 
-#now to prune all trees down to only the trait taxa and not the extra taxa included for placing (the pgls joining data into comparative objects does this anyway before running the analysis but i'm doing it here anyway so I can better see the effects of repositioning and what the tree used in each analysis actually looks like)
-pot.trees <- c(pot.tree1, pot.tree2, pot.tree3, pot.tree4, pot.tree5, pot.tree6, pot.tree7, pot.tree8, pot.tree9, pot.tree10, pot.tree11, pot.null)
+# now to prune all trees down to only the trait taxa and not the extra taxa included for placing (the pgls joining data into comparative objects does this anyway before running the analysis but i'm doing it here anyway so I can better see the effects of repositioning and what the tree used in each analysis actually looks like)
+pot.trees <- c(pot.tree1, pot.tree2, pot.tree3, pot.tree4, pot.tree5, pot.tree6, pot.tree7, pot.tree8, pot.tree9, pot.tree10, pot.tree11, pot.tree12, pot.tree13, pot.tree14, pot.null)
 
+# dunction specifically for the instance where we now need to remove all tips that were extra taxa for keeping for positioning
 drop_non_trait_taxa <- function(tree) {
   drop.tip(tree, tree$tip.label[!tree$tip.label %in% all.taxa.clean$taxon])
 }
-pot.tree1.pruned <- drop_non_trait_taxa(pot.tree1)
 
-all.taxa.clean$taxon[!all.taxa.clean$taxon %in% pot.tree1.pruned$tip.label]
-
-plot_dim1(drop_non_trait_taxa(pot.tree1))
-
+# prunes all 14 potential trees down to only the taxa we have trait data for and not any that wer ekept purely to help position some of the more uncertain taxa
 pot.trees.pruned <- lapply(pot.trees, drop_non_trait_taxa)
 
+# checking if the trees are rooted, which is a requirement of subsequent analyses, they all appear to be rooted
 lapply(pot.trees.pruned, is.rooted)
 
-# compute_brlen_grafen <- function(phy) {
-#   compute.brlen(phy, method = "Grafen", power = 1)
-# }
+# good to have a copy of them all for looking at the options
+pdf("../Output_figures/Potential_trees_and_results/potential_14_trees.pdf", height = 45, width = 15)
+for (i in 1:15){
+  plot_dim1(pot.trees.pruned[[i]])
+}
+dev.off()
 
-
-#pot.trees.pruned <- lapply(pot.trees.pruned, compute_brlen_grafen)
-# for (i in 1:12) {
-#   pot.tree.pruned.i <- pot.trees.pruned[[i]]
-#   
-# }
+# Saving them in a format they can be red back into R in the script being used to generate 
+pot.trees.pruned.nwk <- lapply(pot.trees.pruned, write.tree)
+saveRDS(pot.trees.pruned.nwk, file = "../Input_data/Potential_trees_nwk_list.RData")
 ```
 
+This list of 14 trees are not all combinations f every possible position of each of the uncertain taxa, but should encompass the greatest variation in position for taxa that have particularly extreme values for particular traits. Hence, this list can be used now to determine the phylogenetic signal for all 10 traits in the final dataset and what the value of correlations were for SLA-LA and SD-MH (these were two relationships whose statistical significance we know from preliminary analysis to have been sensitive to whether or not phylogeny was accounted for).
+This will have to be run through scripts 3 and 4 to actually look at the results for each of these trees.
 
 
-Careful bc E. quadrangulata (and potentially E. quadrangulata) will be in the traits dataset once it is added and hence it will not need to be put into the extra.taxa.for.keeping part.
+### Finalising Tree
 
-```{r}
-full.se.new <- read.csv("Input_data/traits_southeast.csv")
-taxa.se.new <- distinct(data.frame('taxon' = full.se.new$taxon))
-new.se.taxa <- taxa.se.new$taxon[!taxa.se.new$taxon %in% all.taxa.clean$taxon]
-not.thornhill.new <- new.se.taxa[!new.se.taxa %in% thorn.tips2$taxon]
-not.thornhill.new[not.thornhill.new %in% bayly.tips$taxon] #ok they aren't in Bayly's tree either so that didnt minimise them
-```
-
-Hence, the new data includes 4 taxa that are not on the thornhill tree: 
-E. dendromorpha - we've decided not to include this taxon, since only 2 individuals were ever measured and there were no fruits measured
-
-E. robusta - not sure but can check how many measurements were made using this to see how complete the data will be
-
-```{r}
-E.robusta.measurements <- as.data.frame(full.se.new[full.se.new$taxon == "Eucalyptus robusta",])
-sort(E.robusta.measurements$trait[!duplicated(E.robusta.measurements$trait)])
-```
+So after determining: that the different positions of even the most extreme-valued dubious taxa (those whose position had been narrowed down at least to 2-4 positions) didn't greatly affect the measures of phylogenetic signal; deciding its ok to only use Patrick Fahey's tree to place taxa not already on the thornhill tree (and otherwise ignore its mild conflict about other taxa that are on it already), and deciding that it's ok to exclude E.dendromorpha and E. robusta bc they only have 2-4 individuals measured and no reproductive trait data, we need to place wimmerensis, silvestris and behriana where Patrick's tree says they go.
 
 
-So 4 individual trees of E. robusta are measured but there are no reproductive traits measured so maybe it's ok to exclude it from the tree since there isn't many correlations that could be drawn from it. Ask to check and do try and see (if I have time before next week) if I can find it in the Jones et al. tree since it is a Symp. (sect. Latoangulatae)
+Also, according some further reading:
 
-E. pauciflora - we decided to exclude this taxon from the se dataset originally, since it was not resolved down to subspecies level and there were already ample measurements for 6 sspp of this including the autonymic one most likely to be equivalent to this name.
+Upon looking at the Jones et al. (2016) phylogeny of the Symphyomrts, E. punctata looks way more like it should go next to E. canaliculata and E. grisea (and E. longirostrata) rather than E. propinqua or E. major, so maybe it should be placed there instead.
 
-Lophostemon confertus - we already know where this should go as an outgroup that is outermost instead of Tristaniopsis laurina
+Jones et al. put E. strzeleckii (paraphyletic w.r.t. E. cadens, though latter is not in our dataset) next to E. yarraensis (monophyletic), but should check Rule's reference anyway
 
-Of the 8 taxa that are not in the original 158:
+E. chapmaniana may be able to be put next to E. smithii (Jones et al., 2016), but it is also very close to E. glaucescens, which is in a different position on the tree. I think the same argument (about why we can go with Patrick's tree only for the taxa not already on our tree via more direct and reliable methods), to justify why we can ignore that that these two sources we're using have major conflicts in other parts of the tree even when those conflicts are only a taxon or two removed from the site/clade of interest that we're using that source to resolve.
 
-E. pauciflora is not being included for aforementioned reaosns
-E. dendromorpha- will also be excluded
-E. robusta - may be excluded, depending on whether or not I can find an easy way to place it on the tree
+E. carolaniae and E. bunyip not on the Jones et al. tree so must find Rule's reference in order to determine where to place them if not entirely leaving them out
+ 
+Now the final list of taxa we are exclding from the treee, despite being in the trait dataset is:
+- Tristaniopsis laurina
+- E. dendromorpha
+- E. robusta
+- E. bunyip
+- E. carolaniae
 
-The remaining 5 will need max. height added to them manually if they don't match the EUCLID data frame as well as the fire-response category:
-
-E. quadrangulata
-Corymbia intermedia
-Lophostemon confertus
-E. microcorys
-E. propinqua
-
-
-So after determining that the different positions of even the most extreme-valued dubious taxa (those whose position had been narrowed down at least to 2-4 positions) didn't greatly affect the measures of phylogenetic signal, and deciding its ok to only use Patrick's tree to place taxa not already on the thornhill tree and otherwise ignore its mild conflict about other taxa that are on it already, and deciding that it's ok to exclude E.dendromorpha bc it only has two individuals measured and no reproductive trait data, we need to:
-
-- Place wimmerensis, silvestris and behriana where Patrick's tree says they go
-- Make the outgroup Lophostemon instead of Tristaniopsis
-- add punctata next to propinqua
 ```{r fig.height = 25, fig.width = 15}
-#best to make this tree from scratch so
+# best to make this next tree from the original final.tree1/pot.null tree
+
 behriana.clade <- read.tree(text = "(Eucalyptus_behriana, Eucalyptus_largiflorens);")
 final.tree2 <- replace_tip(final.tree1, "Eucalyptus largiflorens", behriana.clade)
 
@@ -973,88 +1169,68 @@ final.tree2 <- replace_tip(final.tree2, "Eucalyptus polybractea", wimm.clade)
 silvestris.clade <- read.tree(text = "(Eucalyptus_silvestris, Eucalyptus_wimmerensis, Eucalyptus_microcarpa);")
 final.tree2 <- replace_clade(final.tree2, 'Eucalyptus_wimmerensis', 'Eucalyptus microcarpa', silvestris.clade)
 
-punctata.clade <- read.tree(text = "(Eucalyptus_propinqua, Eucalyptus_punctata);")
-final.tree2 <- replace_tip(final.tree2, "Eucalyptus propinqua", punctata.clade)
-
-final.tree2$tip.label[final.tree2$tip.label == "Tristaniopsis laurina"] <- "Lophostemon confertus"
-final.tree2$tip.label <- gsub("_", " ", final.tree2$tip.label)
-
-plot_dim1(final.tree2)
-#pruning step
-length(final.tree2$tip.label) #167
-final.tree2$tip.label[!final.tree2$tip.label %in% all.taxa.clean$taxon]
-new.taxa <- data.frame("taxon" = c("Lophostemon confertus", "Eucalyptus microcorys", "Eucalyptus propinqua", "Eucalyptus quadrangulata", "Corymbia intermedia"))
-sum(!new.taxa$taxon %in% final.tree2$tip.label) #good none are not on that tree so they're spelled correctly
-new.taxa.full <- data.frame('taxon' = rbind(all.taxa.clean, new.taxa))
-final.tree2 <- keep.tip(final.tree2, final.tree2$tip.label[final.tree2$tip.label %in% new.taxa.full$taxon])
-plot_dim1(final.tree2)
-length(final.tree2$tip.label) #158 (there are original taxa missing as well as extra taxa (plus replaced taxa) so this is a coincidence)
-```
-
-
-
-Then do some reading on the remaining (chapmaniana, strzeleckii; also carolaniae and bunyip to see where they would be otherwise we can exclude them)
-
-Firstly, punctata looks way more like it should go next to canaliculata and grisea (and longirostrata) rather than propinqua or major according to Jones et al. so maybe it should be placed there instead.
-
-Jones et al. put E. strzeleckii (paraphyletic w.r.t. E. cadens) next to E. yarraensis (monophyletic), but should check Rule's reference anyway
-
-E. chapmaniana may be able to be put next to E. smithii (Jones et al.) but it is also very close to E. glaucescens, which is in a different place, I think the same argument about why we can go with Patrick's tree only for the taxa not already on the thornhill tree, to justify why we can sort of ignore that that these two sources we're using have major conflicts in other parts of the tree even when those conflicts are only a taxon or two removed from the site of interest.
-
-E. carolaniae and E. bunyip not on the Jones et al. tree so must find Rule's reference in order to determine where to place them if not entirely leaving them out
- 
-  Can't seem to access the article that Pete linked: https://www.rbg.vic.gov.au/documents/Muelleria_7(4),_p497-505,_Rule,_new_Eucalyptus.pdf 
-  nor find some other site that has that same article that isn't on the missing part of the RBG site.
-
-Now the taxa we expect to be missing from the tree despite being in the trait dataset:
-- Tristaniopsis laurina
-- E. dendromorpha
-- maybe E. robusta too
-(E. pauciflora should have been taken out at the start)
-
-```{r fig.height = 25, fig.width = 15}
-#best to make this tree from scratch so
-behriana.clade <- read.tree(text = "(Eucalyptus_behriana, Eucalyptus_largiflorens);")
-final.tree3 <- replace_tip(final.tree1, "Eucalyptus largiflorens", behriana.clade)
-
-wimm.clade <- read.tree(text = "(Eucalyptus_polybractea, Eucalyptus_wimmerensis);")
-final.tree3 <- replace_tip(final.tree3, "Eucalyptus polybractea", wimm.clade)
-
-silvestris.clade <- read.tree(text = "(Eucalyptus_silvestris, Eucalyptus_wimmerensis, Eucalyptus_microcarpa);")
-final.tree3 <- replace_clade(final.tree3, 'Eucalyptus_wimmerensis', 'Eucalyptus microcarpa', silvestris.clade)
-
 punctata.clade <- read.tree(text = "(Eucalyptus_canaliculata, Eucalyptus_punctata);")
-final.tree3 <- replace_tip(final.tree3, "Eucalyptus canaliculata", punctata.clade)
-
-final.tree3$tip.label[final.tree3$tip.label == "Tristaniopsis laurina"] <- "Lophostemon confertus"
-
+final.tree2 <- replace_tip(final.tree2, "Eucalyptus canaliculata", punctata.clade)
 
 strzeleckii.clade <- read.tree(text = "(Eucalyptus_strzeleckii, Eucalyptus_yarraensis);")
-final.tree3 <- replace_tip(final.tree3, "Eucalyptus yarraensis", strzeleckii.clade)
+final.tree2 <- replace_tip(final.tree2, "Eucalyptus yarraensis", strzeleckii.clade)
 
 chapmaniana.clade <- read.tree(text = "(Eucalyptus_chapmaniana, Eucalyptus_smithii);")
-final.tree3 <- replace_tip(final.tree3, "Eucalyptus smithii", chapmaniana.clade)
+final.tree2 <- replace_tip(final.tree2, "Eucalyptus smithii", chapmaniana.clade)
 
+final.tree2$tip.label <- gsub("_", " ", final.tree2$tip.label)
 
-final.tree3$tip.label <- gsub("_", " ", final.tree3$tip.label)
+# now to have a look at the current status and check nothing has gone wrong woth the names and they're all in the correct places
+plot_dim1(final.tree2)
 
-plot_dim1(final.tree3)
-#pruning step
-length(final.tree3$tip.label)  #169
-new.taxa <- data.frame("taxon" = c("Lophostemon confertus", "Eucalyptus microcorys", "Eucalyptus propinqua", "Eucalyptus quadrangulata", "Corymbia intermedia"))
-sum(!new.taxa$taxon %in% final.tree3$tip.label) #good none are not on that tree so they're spelled correctly
-new.taxa.full <- data.frame('taxon' = rbind(all.taxa.clean, new.taxa))
-final.tree3 <- keep.tip(final.tree3, final.tree3$tip.label[final.tree3$tip.label %in% new.taxa.full$taxon])
-plot_dim1(final.tree3)
-length(final.tree3$tip.label) #160 (there are original taxa missing as well as extra taxa (plus replaced taxa) so this is a coincidence)
-final.tree <- final.tree3
+# now to prune away the close relative we kept for positioning but aren't in the trait dataset
+
+## should be 169 taxa in the unpruned final.tree2
+length(final.tree2$tip.label) 
+
+final.tree <- keep.tip(final.tree2, final.tree2$tip.label[final.tree2$tip.label %in% all.taxa.clean$taxon])
+
+## now the tree should have 160 tips corresponding to the 160/165 trait taxa that we have managed to determine a reasonably position for
+length(final.tree$tip.label)
+
+# final look at final product
+plot_dim1(final.tree)
 ```
 
-```{r}
-#to export
-ggsave(plot_dim1(final.tree), file = 'Output_figures/final_tree.pdf', width = 15, height = 25)
-write.tree(final.tree, file = "Input_data/final_tree.txt") #lets put it here for now
+```{r, fig.height = 25, fig.width = 15}
+# to export a pdf of this final tree
+ggsave(plot_dim1(final.tree), file = '../Output_figures/final_tree.pdf', width = 15, height = 25)
+
+# to export the newick file of the tree
+write.tree(final.tree, file = "../Input_data/final_tree.txt") #lets put it here for now
 ```
+
+## Labelling Major Groups
+
+```{r fig.height = 25, fig.width = 15}
+# we need to know the number of the nodes we wish to label
+pdf("../Output_figures/nodelabels_test.pdf", height = 45, width = 15)
+plot(final.tree)
+nodelabels()
+dev.off()
+
+edge <- as.data.frame(final.tree$edge)
+
+annotated.tree <- ggtree(final.tree) + xlim(0, 32) + geom_tiplab() + 
+  geom_point2(aes(subset=(node==163)), shape=23, size=6, fill='red') + geom_text(aes(0.5, 17), label = 'Tribe\n Eucalypteae', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_point2(aes(subset=(node==166)), shape=23, size=5, fill='red') + geom_text(aes(2, 75), label = 'Subg. Symphyomyrtus', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_text(aes(10, 62), label = 'Subg. Alveolata', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_point2(aes(subset=(node==258)), shape=23, size=5, fill='red') + geom_text(aes(11.5, 17), label = 'Subg. Eucalyptus', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_text(aes(18, 8), label = 'Subg. Eudesmia', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_point2(aes(subset=(node==288)), shape=23, size=5, fill='black') + geom_text(aes(20, 29.25), label = 'Ser. Radiatae', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==232)), shape=23, size=5, fill='black') + geom_text(aes(9.5, 76), label = 'Sect. Adnataria', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==215)), shape=23, size=5, fill='black') + geom_text(aes(12.5, 104), label = 'Sect. "Glandulosae"', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==206)), shape=23, size=5, fill='black') + geom_text(aes(16.75, 118), label = 'Sect. Exsertaria', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==172)), shape=23, size=5, fill='black') + geom_text(aes(8.75, 127.5), label = 'Sect. Maidenaria', check_overlap = TRUE, color = 'black', size = 6)
+
+ggsave(annotated.tree, file = "../Output_figures/labelled_tree.pdf", height = 25, width = 15)
+```
+
 
 
 ## Heatmap of All Data
@@ -1062,11 +1238,14 @@ write.tree(final.tree, file = "Input_data/final_tree.txt") #lets put it here for
 Now to plot visualise this data as a heatmap, plotting 3 different heatmaps for each group of traits: max height and stem sapwood density; SLA, leaf area and leaf mass; and fruit wall width, fruit mass, seed mass. This is so it easier to interpret patterns and read the map because it creates spaces between blocks of 2-3 related traits. Also data was log scaled (base 10) so that comparisons between traits with very different variances could be made.
 
 ```{r fig7, fig.height = 25, fig.width = 12}
-# for 
-final.tree <- read.tree("Input_data/final_tree.txt")
-final.tree$tip.label <- gsub("_", " ", final.tree$tip.label)
+# reading in the data from script 1
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+eucs.scaled.data <- eucs.scaled.data[,!names(eucs.scaled.data) %in% c('X')]
+eucs.scaled.data$Sprouting_Type <- as.factor(gsub("_", " ", eucs.scaled.data$Sprouting_Type))
+eucs.scaled.data$Sprouting_Type2 <- as.factor(gsub("_", " ", eucs.scaled.data$Sprouting_Type2))
 
-#preparing the data for 
+
+#preparing the data for attahcing to the tree as a heatmap (i.e. need the taxa to be row names instead of the first column)
 heatmap.data.height <- data.frame("MH" = eucs.scaled.data$max_height_m, "RH" = eucs.scaled.data$relative_height_by_girth, row.names = eucs.scaled.data$taxon)
 
 heatmap.data.stem <- data.frame("SD" = eucs.scaled.data$stem_density_g_per_ml, "RBT" = eucs.scaled.data$relative_bt_by_girth, row.names = eucs.scaled.data$taxon)
@@ -1075,9 +1254,20 @@ heatmap.data.leaf <- data.frame("SLA" = eucs.scaled.data$sla_mm2_per_mg, "LA" = 
 
 heatmap.data.fruits <- data.frame("FW" = eucs.scaled.data$fruit_wall_width_mm, "FM" = eucs.scaled.data$fruit_mass_mg, "SM" = eucs.scaled.data$seed_mass_mg, row.names = eucs.scaled.data$taxon)
 
-map.tree <- ggtree(final.tree, branch.length='none', layout='rectangular') %<+% eucs.scaled.data + xlim(0,70) + geom_tiplab(size = 4, offset = 26) + geom_tippoint(aes(colour=Sprouting_Type), size=2.7)
+# the baseline tree with enough space to the right to fit all of the heatmaps to be attached
+map.tree <- ggtree(final.tree, branch.length='none', layout='rectangular') %<+% eucs.scaled.data + xlim(0,70) + geom_tiplab(size = 5, offset = 26) +  geom_tippoint(aes(colour=Sprouting_Type), size=2.7) + 
+  geom_point2(aes(subset=(node==166)), shape=23, size=4, fill='red') + geom_text(aes(0.7, 76), label = 'Subg.\n Symphyomyrtus', check_overlap = TRUE, color = 'red', size = 6) +
+  geom_text(aes(15, 62), label = 'Subg. Alveolata', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_point2(aes(subset=(node==258)), shape=23, size=4, fill='red') + geom_text(aes(8.5, 16), label = 'Subg.\n Eucalyptus', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_text(aes(18, 8), label = 'Subg. Eudesmia', check_overlap = TRUE, color = 'red', size = 6) + 
+  geom_point2(aes(subset=(node==288)), shape=23, size=4, fill='black') + geom_text(aes(11, 30), label = 'Ser.\n Radiatae', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==232)), shape=23, size=4, fill='black') + geom_text(aes(11, 72), label = 'Sect.\n Adnataria', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==215)), shape=23, size=4, fill='black') + geom_text(aes(12, 108), label = 'Sect.\n "Glandulosae"', check_overlap = TRUE, color = 'black', size = 6) + 
+  geom_point2(aes(subset=(node==206)), shape=23, size=4, fill='black') + geom_text(aes(12, 117.5), label = 'Sect.\n Exsertaria', check_overlap = TRUE, color = 'black', size = 6) + geom_point2(aes(subset=(node==172)), shape=23, size=4, fill='black') + geom_text(aes(4, 128), label = 'Sect. Maidenaria', check_overlap = TRUE, color = 'black', size = 6)
+
 plot(map.tree)
 
+# adding first heatmap of stem traits to the tree closest to the ends of the 
 map.height <- gheatmap(map.tree, heatmap.data.height,
   offset = -0.5,
   width = 0.2,
@@ -1096,7 +1286,8 @@ map.height <- gheatmap(map.tree, heatmap.data.height,
   legend_title = "Value"
 ) + xlim(0,70)
 
-#plot(map.height)
+# see if the parameters are correct, everything visiable on the page etc.
+plot(map.height)
 
 map.stem <- gheatmap(map.height, heatmap.data.stem,
   offset = 4.5,
@@ -1158,6 +1349,118 @@ map.total <- gheatmap(map.stem.leaf, heatmap.data.fruits,
 
 plot(map.total)
 
-ggsave(map.total, file = "Output_figures/heatmap.pdf", width = 20, height = 25)
+ggsave(map.total, file = "../Output_figures/heatmap.pdf", width = 20, height = 28)
 ```
+
+
+## Colorblind Heatmap
+
+Instead of using the default colours for the heatmap (red and green), we need to use different color combinations to be more colorblind-friendly.
+
+```{r fig8, fig.height = 25, fig.width = 12}
+# reading in the data from script 1
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+eucs.scaled.data <- eucs.scaled.data[,!names(eucs.scaled.data) %in% c('X')]
+    # need to deal with the underscores in the sprouting type columns here
+eucs.scaled.data$Sprouting_Type <- as.factor(eucs.scaled.data$Sprouting_Type)
+eucs.scaled.data$Sprouting_Type2 <- as.factor(eucs.scaled.data$Sprouting_Type2)
+
+#preparing the data for 
+heatmap.data.height <- data.frame("MH" = eucs.scaled.data$max_height_m, "RH" = eucs.scaled.data$relative_height_by_girth, row.names = eucs.scaled.data$taxon)
+
+heatmap.data.stem <- data.frame("SD" = eucs.scaled.data$stem_density_g_per_ml, "RBT" = eucs.scaled.data$relative_bt_by_girth, row.names = eucs.scaled.data$taxon)
+
+heatmap.data.leaf <- data.frame("SLA" = eucs.scaled.data$sla_mm2_per_mg, "LA" = eucs.scaled.data$leaf_area_cm2, "LM" = eucs.scaled.data$leaf_mass_g, row.names = eucs.scaled.data$taxon)
+
+heatmap.data.fruits <- data.frame("FW" = eucs.scaled.data$fruit_wall_width_mm, "FM" = eucs.scaled.data$fruit_mass_mg, "SM" = eucs.scaled.data$seed_mass_mg, row.names = eucs.scaled.data$taxon)
+
+map.tree <- ggtree(final.tree, branch.length='none', layout='rectangular') %<+% eucs.scaled.data + xlim(0,70) + geom_tiplab(size = 5, offset = 26) + geom_tippoint(aes(colour = Sprouting_Type), size=2.7) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown",
+                                'NA' = "grey"))
+plot(map.tree)
+
+map.height <- gheatmap(map.tree, heatmap.data.height,
+  offset = -0.5,
+  width = 0.2,
+  low = "red",
+  high = "yellow",
+  color = "white",
+  colnames = TRUE,
+  colnames_position = "bottom",
+  colnames_angle = 0,
+  colnames_level = NULL,
+  colnames_offset_x = 0,
+  colnames_offset_y = 0,
+  font.size = 5,
+  family = "",
+  hjust = 0.5,
+  legend_title = "Value"
+) + xlim(0,70)
+
+#plot(map.height)
+
+map.stem <- gheatmap(map.height, heatmap.data.stem,
+  offset = 4.5,
+  width = 0.2,
+  low = "red",
+  high = "yellow",
+  color = "white",
+  colnames = TRUE,
+  colnames_position = "bottom",
+  colnames_angle = 0,
+  colnames_level = NULL,
+  colnames_offset_x = 0,
+  colnames_offset_y = 0,
+  font.size = 5,
+  family = "",
+  hjust = 0.5,
+  legend_title = "Value"
+) + xlim(0,70)
+
+#plot(map.stem)
+
+map.stem.leaf <- gheatmap(map.stem, heatmap.data.leaf,
+  offset = 9.5,
+  width = 0.3,
+  low = "red",
+  high = "yellow",
+  color = "white",
+  colnames = TRUE,
+  colnames_position = "bottom",
+  colnames_angle = 0,
+  colnames_level = NULL,
+  colnames_offset_x = 0,
+  colnames_offset_y = 0,
+  font.size = 5,
+  family = "",
+  hjust = 0.5,
+  legend_title = "Value"
+) + xlim(0,70)
+
+#plot(map.stem.leaf)
+
+map.total <- gheatmap(map.stem.leaf, heatmap.data.fruits,
+  offset = 17,
+  width = 0.3,
+  low = "red",
+  high = "yellow",
+  color = "white",
+  colnames = TRUE,
+  colnames_position = "bottom",
+  colnames_angle = 0,
+  colnames_level = NULL,
+  colnames_offset_x = 0,
+  colnames_offset_y = 0,
+  font.size = 5,
+  family = "",
+  hjust = 0.5,
+  legend_title = "Value"
+) + xlim(0,70)
+
+plot(map.total)
+
+ggsave(map.total, file = "../Output_figures/heatmap_colorblind.pdf", width = 20, height = 28)
+```
+
 
