@@ -1,0 +1,739 @@
+---
+title: "Data Preparation Using Eucdata"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+This new dataprep version uses the trait_medians object (long-format data) from the eucdata package which automatically removes the grampians SD from the combined_traits object from which those traits are calculated. The allometric traits of Relative Height and Relative Bark Thickness recalculated according to a more accurate model as of November 2020, same as the previous version. The medians here were calculated after data from each of the four datasets were pooled rather than the the previous method (which also used the datasets from the eucdata package instead) where the medians were taken first by dataset and then by taxon for those taxa that occured in more than a single dataset. The max. height data also came from taking the median of all the subspecies where it was not specifies unless otherwise stated. 
+    -I need to re-check so of the subspecies that were originally manually assigned and keep my        assignment for those where I'm sure (based on distribution etc.) that my previously              manually assigned value is more correct.
+
+
+## All Required Packages and Functions
+
+```{r}
+# # for re-checking code September 2022
+# install.packages("devtools")
+# devtools::install_github('EucTraitEcology/eucdata',
+#                           ref = 'main',
+#                           auth_token = "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", force = TRUE)
+
+
+# library(devtools) # only needed for installing the eucdata package
+library(eucdata) # New data repository
+library(dplyr)
+library(readxl) # to input data from csv, especially taxon name-status checking
+library(ggplot2) # for plots checking traits of E. sieberi and assumption it can be included in the combination resprouter category
+library(gridExtra) # for the 'grid.arrange' function allowing arrangement of multiple plots on the same image
+library(sf) # don't use directly as doesn't need to be loaded, but required to be installed in order to install ozmaps
+library(ozmaps) # required for sampling map of collecting locations
+library(viridis) # required for colours on map of collecting locations
+```
+
+
+
+## Data Preparation
+
+
+```{r}
+# extra chunk until we can get eucdata package to download
+load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/combined_traits.rda")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/trait_medians.rda")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/euclid.rda")
+```
+
+```{r}
+# this is the long-form row-bound pooled data from all datasets with the grampians SD data removed
+trait.data.full <- combined_traits 
+
+# this is the calculated medians from the eucdata package with the max height added from the EUCLID database and all 170 taxa with measured data and all traits for which there is any data even if only in a sigle dataset
+trait.medians <- trait_medians 
+
+#to record what species there is data for in each of the 4 datasets that were pooled together
+taxa.grp <- unique(trait.data.full[trait.data.full$dataset == 'grampians', c('taxon')])
+taxa.mall <- unique(trait.data.full[trait.data.full$dataset == 'mallee', c('taxon')]) 
+taxa.se <- unique(trait.data.full[trait.data.full$dataset == 'southeast', c('taxon')])
+taxa.wa <- unique(trait.data.full[trait.data.full$dataset == 'stirling', c('taxon')])
+
+# total taxa including duplicated lines, 182 plus 13 duplicated appearing in multiple datasets
+sum(length(taxa.grp), length(taxa.mall), length(taxa.se), length(taxa.wa)) 
+
+taxa.in.2.datasets <- unlist(list(taxa.grp, taxa.mall, taxa.se, taxa.wa))[duplicated(unlist(list(taxa.grp, taxa.mall, taxa.se, taxa.wa)))]
+
+# Column of all unique taxon names
+all.taxa <- data.frame('taxon' = unique(trait.data.full$taxon))
+
+# Extracting initial datasets and, for duplicated taxa, second datasets in which they occur (to be joined later on)
+datasets <- unique(trait.data.full[c('taxon', 'dataset')])
+rownames(datasets) <- NULL
+datasets2 <- unique(trait.data.full[c('taxon','dataset')])[duplicated(unique(trait.data.full[c('taxon', 'dataset')])$taxon),]
+rownames(datasets2) <- NULL
+names(datasets2) <- c('taxon', 'dataset2')
+```
+
+
+All but three remaining taxa in the dataset are not considered current according to APC (2021), but we use the superceded names for inernal consistency throughout this document:
+E. costata subsp. murrayana (now known as E. incrassata)
+E. cinerea subsp. victoriensis (now known as E. cinerea subsp. triplex)
+E. decipiens subsp. chalara (intergrade between E. decipiens and E. adesmophloia)
+
+
+### Completing the Max Height data for each taxon:
+
+Here we use the Euclid dataset extracted from 2006 (Slee et al. 2006). Some of the mallee species are not in the euclid list bc their status as a species is not well supported and they are controversial. 
+
+The five taxa now with missing values for max height are:
+E. costata subsp. murrayana (obsolete name) -> 8m (height of E. incrassata to which this taxon is now considered to belong)
+E. ovata subsp. ovata -> 20m (the height of its obsolete synonym E. ovata var. ovata)
+E. silvestris: 7m (that of E. odorata to which this taxon now belongs)  
+E. wimmerensis: 8m (that of the taxa this species is poorly resolved from and for which height data is available) 
+Lophostemon confertus -> 40m according to Rob Kooyman (AusTraits Database) as this taxon is not in the genus Eucalyptus
+
+Note: in previous versions of this script, the dataset was such that there were an additional 4 taxa for which height was inferred manually as the axa were not resolved completely down to subspecies but it could be inferred from comparing the collecting location to the distribution map of each subspecies. Since the dataset has become more resolved, those taxa have been changed to the same taxa that were inferred from distribution anyway.
+
+```{r}
+# adding max heights that were missing entirely from the euclid heights column in trait.medians
+trait.medians[trait.medians$taxon == 'Eucalyptus costata subsp. murrayana', c('max_height_m')] <- 8
+trait.medians[trait.medians$taxon == 'Eucalyptus silvestris', c('max_height_m')] <- 7
+trait.medians[trait.medians$taxon == 'Eucalyptus wimmerensis', c('max_height_m')] <- 8
+trait.medians[trait.medians$taxon == 'Eucalyptus ovata subsp. ovata', c('max_height_m')] <- 20
+trait.medians[trait.medians$taxon == 'Lophostemon confertus', c('max_height_m')] <- 40
+```
+
+
+### Which of the traits are we inlcuding in our analysis?
+
+Not all datasets have the same set of traits measured.
+The mallee dataset was most limiting and only had data for: SLA, leaf area, leaf mass, fruit mass, seed mass. The remaining datasets include fruit wall thickness and only the southeast and stirling datasets include stem density, relative height by girth and relative bark thickness by girth. While only the mallee traits will be measured for almost all taxa, the remaining aforementioned traits cover enough different aspects of functional dimensions and are measured in enough taxa to be able to feasibly draw conclusions.
+
+
+```{r}
+trait.medians <- trait.medians[c('taxon', 'max_height_m', 'allometric_height_girth',
+                                 'stem_density_g_per_ml', 'allometric_bark_girth',
+                                 'sla_mm2_per_mg', 'leaf_area_cm2', 'leaf_mass_g',
+                                 'fruit_wall_width_mm', 'fruit_mass_mg', 'seed_mass_mg')]
+
+names(trait.medians)[names(trait.medians) == 'allometric_height_girth'] <- 'relative_height_by_girth'
+names(trait.medians)[names(trait.medians) == 'allometric_bark_girth'] <- 'relative_bt_by_girth'
+```
+
+
+```{r}
+eucs.data.prel <- trait.medians %>%
+  left_join(datasets[!duplicated(datasets$taxon),]) %>%
+  left_join(datasets2)
+
+eucs.data.prel <- eucs.data.prel[, c("taxon", "dataset", "dataset2", "max_height_m",
+                                   "relative_height_by_girth", "stem_density_g_per_ml",
+                                   "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2",
+                                   "leaf_mass_g", "fruit_wall_width_mm", "fruit_mass_mg",
+                                   "seed_mass_mg")]
+```
+
+
+### Adding Fire-Response Traits
+
+The following fire response data was sourced from Nicolle (2006). Only a single taxon included in the phylogeny is a stem sprouter (Eucalyptus sieberi), the fire responses exhibited by the remaining taxa are either obligate seeding, resprouting from a lignotuber, or capable of resprouting from both a lignotuber and epicormic buds in the stems (combination sprouters).
+
+Furthermore, some regeneration strategies needed to be inferred as Nicolle (2006) uses the older Brooker (2000) taxonomy, which did not include all taxa included in our dataset. Ultimately, the strategies of some taxa could not be determined and remain as missing data.
+E. falciformis was inferred to be equivalent to Brooker's E. willisi and was assigned a strategy as such.
+E. sabulosa inferred to have same strategy as Brooker's E. aromaphloia based on Nicolle (2019) noting E. aromaphloia subsp. sabulosa being a synonym of E. sabulosa.
+E. bunyip, being an intergrade between E. camphora and E. strzeleckii which are both combination sprouters, was inferred to share the same strategy.
+E. beyeriana inferred to be synonym of E. beyeri according to Nicolle (2019) and hence assigned the same strategy.
+E. carolaniae, being an intergrade between E. cypellocarpa and E. goniocalyx which are both combination sprouters, was similarly assigned.
+Lophostemon confertus was inferred to be a lignotuber resprouter based on Clarke et al. (2013) considering it to be a sprouter and Guinto et al. (1999) mentioning that its epicormic strands are killed by relatively low intensity fires. Hence it is effectively incapable of epicormic post-fire regeneration.
+E. alaticaulis, was inferred to be a combination resprouter as all but two unknown members of its series (according to Brooker 2000) were such. The two unknown species were also the same two that later treatments considered to belong in their own seperate series.
+Subspecies were mostly noted to have the same strategies with rare exception, only one such taxon was included in our dataset and without its sister subspecies to compare: E. loxophleba subsp. loxophleba.
+E. arenicola is a relatively newly defined species and so its regeneration strategy could not determined.
+Similarly, with the outgroup species, Syncarpia glomulifera and Tristaniopsis laurina, we could not get info on their post-fire regeneration.
+E. victoriana, E. fastigata, E. pilularis and E. nitens were all listed as unknown regarding sprouting type within Nicolle (2006).
+
+Upon further investigation, E. sieberi has been observed to be able to basally resprout when young (from Gill and Moore 'Tree Damage' chapter on Fire damage in Cheney et al.s 1992 'A prescribed burning guide for young regrowth forests of silvertop ash') and somewhat basally resprout in gippsland (Ezra's Master's Thesis). Hence, we've re-assigned it to be in the Variably Sprouting category rather than just as a stem sprouter as Nicolle (2006) noted.
+
+E. nitens, E. megacarpa, E. saligna, and E. pilularis had evidence of being able to resprout epicormically after fire and no lignotuber by Nicolle or another source (recent sources that contradict Nicolle census would take precedence like with E. sieberi). Hence, we re-assigned them to be Stem-only resprouters.
+
+E. fastigata was known to survive severe fire (2% mortality rate according to Vivian et al. 2008), but no  mention could be found of whether or not it had a lignotuber or could basally resprout. Hence, it remained NA.
+
+Although, this analysis will only investigate the three categories of obligate seeder, lignotuber-only resprouter, and combination resprouter, there were a small number of taxa that had unknown sprouting ability but were known to lack a lignotuber and this might be useful to distinguish from true NA-values taxa at some point.
+
+```{r}
+# Reading in and formatting the fire response data
+fire.data <- read_excel("../Input_data/fire_data.xlsx", sheet = "fire.response")
+## removed NA rows and selected the columns that contain the data itself
+fire.data <- data.frame(fire.data[!is.na(fire.data$taxon), c("taxon", "Sprouter", "Type")]) 
+## removed final three rows with '# ' at beginning that were just some noted and a taxon we're no longer using
+fire.data <- data.frame(fire.data[!grepl("^#.+$", fire.data$taxon),])
+
+# Assigning categories to binary of resprouting ability
+fire.data[fire.data == "NA"] <- NA
+## assigning all the resprouters to the dummy variable 1
+fire.data[fire.data == "S"] <- 1 
+## assigning obligate seeders to 0
+fire.data[fire.data == "O"] <- 0 
+## just the sprouter variable
+sprouting.broad <- data.frame(fire.data[c("taxon", "Sprouter")]) 
+
+
+# now to add and code the fire data by whether or not they can sprout from either the lignotuber or stem
+sprouting.detailed <- data.frame("taxon" = fire.data$taxon, "Stem_Sprouter" = fire.data$Type)
+## combination sprouters are also stem sprouters
+sprouting.detailed[sprouting.detailed == 'C'] <- 1 
+## deciding to code variable species as capable of stem sprouting sometimes so being included in that category
+sprouting.detailed[sprouting.detailed == 'Var.'] <- 1 
+## to include the orthographic variation of the categories
+sprouting.detailed[sprouting.detailed == 'Var'] <- 1 
+## stem sprouters coded as able to epicormically resprout, but this means it is coded the same as combination resprouters (sprouter = 1 & epicormic = 1)
+sprouting.detailed[sprouting.detailed == 'St'] <- 1
+## lignotuber-only sprouters can't resprout from the stem
+sprouting.detailed[sprouting.detailed == 'L'] <- 0
+
+# Now to create the column coding for lignotuber resprouting ability (of any kind including taxa that can also resprout epicormically)
+ligno.col <- data.frame("Lignotuber_Sprouter" = fire.data$Type)
+ligno.col[ligno.col == 'L'] <- 1
+# true in almost all cases, only E. sieberi is a stem-only sprouter
+ligno.col[ligno.col == 'C'] <- 1 
+ligno.col[ligno.col == 'St'] <- 0
+ligno.col[ligno.col == 'Var'] <- 1
+ligno.col[ligno.col == 'Var.'] <- 1
+
+# checking if the resprouter and lignotuber resprouter column all but identical i.e. all but one species that can resprout. 
+## The only difference is the one taxon that is a stem sprouter
+sum(!ligno.col$Lignotuber_Sprouter == fire.data$Sprouter, na.rm = TRUE) 
+
+# joining the columns together
+sprouting.detailed <- cbind(sprouting.detailed, ligno.col)
+eucs.fire.data <- left_join(sprouting.broad, sprouting.detailed)
+## and for future use and completeness, since not every analysis requires scaled data:
+eucs.data.prel <- left_join(eucs.data.prel, eucs.fire.data) 
+
+# Now to include the case where the 10 variably-stem-sprouting taxa are NOT considered as Stem sprouters (equally valid approach):
+sprouting.detailed2 <- data.frame("taxon" = fire.data$taxon, "Stem_Sprouter" = fire.data$Type)
+## combination sprouters are also stem sprouters
+sprouting.detailed2[sprouting.detailed2 == 'C'] <- 1 
+## deciding to code variable species non-stem-sprouting, as they're incapable of stem sprouting reliably
+sprouting.detailed2[sprouting.detailed2 == 'Var.'] <- 0 
+## to include the orthographic variation there
+sprouting.detailed2[sprouting.detailed2 == 'Var'] <- 0 
+sprouting.detailed2[sprouting.detailed2 == 'St'] <- 1
+sprouting.detailed2[sprouting.detailed2 == 'L'] <- 0
+
+# renaming the column in this alternatively coded dataset
+names(sprouting.detailed2)[names(sprouting.detailed2) == 'Stem_Sprouter'] <- 'Stem_Sprouter2'
+
+eucs.fire.data <- left_join(eucs.fire.data, sprouting.detailed2)
+
+eucs.data.prel <- left_join(eucs.data.prel, sprouting.detailed2)
+
+# column of lignotuber-only 
+ligno.only <- data.frame('Lignotuber_Only' = eucs.data.prel$Lignotuber_Sprouter)
+## this will also allow us to select the rows of lignotuber_sprouter that correspond to combinations sprouters
+is.combo.sprouter <- eucs.data.prel$Stem_Sprouter == 1 
+is.combo.sprouter[is.na(is.combo.sprouter)] <- FALSE
+ligno.only[is.combo.sprouter,] <- 0
+eucs.data.prel <- cbind(eucs.data.prel, ligno.only)
+
+# now adding in a character column stating all three categories instead of using binary variables that only partially answer the question, used more often later in the analysis, but also easier to create from existing binary variables
+cat.sprout <- data.frame('Sprouting_Type' = rep(NA, length(eucs.data.prel$taxon)))
+eucs.data.prel <- cbind(eucs.data.prel, cat.sprout)
+eucs.data.prel$Sprouting_Type[ligno.only == 1] <- 'Lignotuber_Only'
+eucs.data.prel$Sprouting_Type[eucs.data.prel$Sprouter == 0] <- 'Obligate_Seeder'
+eucs.data.prel$Sprouting_Type[eucs.data.prel$Stem_Sprouter == 1] <- 'Combination_Sprouter'
+eucs.data.prel$Sprouting_Type <- as.factor(eucs.data.prel$Sprouting_Type)
+## checking how many lignotuber-only/basal-only resprouters we have in the dataset: 40 btw
+sum(ligno.only == 1, na.rm = TRUE)
+
+#for the alternate designation of 10 variable taxa as lignotuber-only repsrouters still using the same 3-level categorical variable method
+eucs.data.prel <- cbind(eucs.data.prel, data.frame('Sprouting_Type2' = as.character(eucs.data.prel$Sprouting_Type)))
+eucs.data.prel$Sprouting_Type2[eucs.data.prel$Sprouter == 1 & eucs.data.prel$Stem_Sprouter2 == 0 & !is.na(eucs.data.prel$Stem_Sprouter2) & eucs.data.prel$Sprouting_Type2 == 'Combination_Sprouter'] <- 'Lignotuber_Only'
+eucs.data.prel$Sprouting_Type2 <- as.factor(eucs.data.prel$Sprouting_Type2)
+
+# Now include an extra two columns including the Stem_Sprouter category to plot where that category falls later
+eucs.data.prel <- cbind(eucs.data.prel, data.frame("Sprouting_Type3" = as.character(eucs.data.prel$Sprouting_Type)))
+eucs.data.prel$Sprouting_Type3[eucs.data.prel$Lignotuber_Sprouter == 0 & eucs.data.prel$Stem_Sprouter == 1 & !is.na(eucs.data.prel$Stem_Sprouter)] <- 'Stem_Only'
+eucs.data.prel$Sprouting_Type3 <- as.factor(eucs.data.prel$Sprouting_Type3)
+
+eucs.data.prel <- cbind(eucs.data.prel, data.frame("Sprouting_Type4" = as.character(eucs.data.prel$Sprouting_Type2)))
+eucs.data.prel$Sprouting_Type4[eucs.data.prel$Lignotuber_Sprouter == 0 & eucs.data.prel$Stem_Sprouter == 1 & !is.na(eucs.data.prel$Stem_Sprouter)] <- 'Stem_Only'
+eucs.data.prel$Sprouting_Type4 <- as.factor(eucs.data.prel$Sprouting_Type4)
+
+# Now to scale the lignotuber-Only variable so the mean and sd are both 1 for inclusion into the networks and tile diagrams
+eucs.data.prel$LO2 <- as.character(eucs.data.prel$Sprouting_Type3)
+eucs.data.prel$LO2[eucs.data.prel$LO2 == 'Lignotuber_Only' & !is.na(eucs.data.prel$LO2)] <- 1
+eucs.data.prel$LO2[!eucs.data.prel$LO2 == 1 & !is.na(eucs.data.prel$LO2)] <- 0
+eucs.data.prel$LO2 <- as.numeric(eucs.data.prel$LO2)
+# mean = 0.2484, sd = 0.4334
+eucs.data.prel$LO2 <- scale(eucs.data.prel$LO2)
+
+# Also we might want to determine where E. sieberi is in the datacloud by creating another column (just 1 and 0 should suffice for just looking at it later)
+sieberi <- data.frame('Sieberi' = rep(NA, length(eucs.data.prel$taxon)))
+eucs.data.prel <- cbind(eucs.data.prel, sieberi)
+eucs.data.prel$Sieberi[eucs.data.prel$taxon == 'Eucalyptus sieberi'] <- 'Y'
+eucs.data.prel$Sieberi[!eucs.data.prel$taxon == 'Eucalyptus sieberi'] <- 'N'
+```
+
+### Removal of Species not on the Tree
+
+From later investigations, it is known that E. bunyip and E. carolaniae are intergrade taxa (defined by Rule) and rarely considered as separate entities so have very little phylogenetic information available.
+
+E. dendromorpha and E. robusta also had insufficient phylogenetic information to position them on the tree, as well as having very little trait data recorded as well.
+
+```{r}
+dendro.data <- trait.data.full[trait.data.full$taxon == 'Eucalyptus dendromorpha',]
+unique(dendro.data$tree_id)
+unique(dendro.data$trait)
+rob.data <- trait.data.full[trait.data.full$taxon == 'Eucalyptus robusta',]
+unique(rob.data$tree_id)
+unique(rob.data$trait)
+```
+
+For dendromorpha we have data from two trees (same locality) and the following traits:
+relative height
+relative bark thickness
+stem density
+leaf area
+sla
+leaf mass
+NO RERODUCTIVE TRAITS!
+
+For robusta, we have data from 4 different trees (also all same locality) an data for:
+relative height
+stem density
+sla
+leaf area
+leaf mass
+NO BARK and NO REPRODUCTIVE TRAITS!
+
+Also, Tristaniopsis laurina data came from a single individual that was not particularly representative of the taxon (small and young), so we have subsequently decided to go with using Syncarpia and Lophostemon as outgroups.
+
+```{r}
+trist.data <- trait.data.full[trait.data.full$taxon == 'Tristaniopsis laurina',]
+unique(trist.data$tree_id)
+```
+
+Now to remove all 5 of these taxa so that all subsequent analyses have consistent species lists.
+
+```{r}
+# first to make a list of all taxa for which we have data, as this is what is used in the following script to determine which taxa match with the phylogeny and which need more information to be included on it
+all.taxa.clean <- data.frame('taxon' = eucs.data.prel$taxon)
+write.csv(all.taxa.clean, file = "../Input_data/all_taxa_clean.csv")
+
+# now to remove the taxa we know were later excluded for phylogenetic reasons and export that species list as well for completeness
+eucs.data.prel <- eucs.data.prel[!eucs.data.prel$taxon %in% c('Eucalyptus dendromorpha', 'Eucalyptus robusta', 'Eucalyptus bunyip', 'Eucalyptus carolaniae', 'Tristaniopsis laurina'),]
+all.taxa.final <- data.frame('taxon' = eucs.data.prel$taxon)
+write.csv(all.taxa.final, file = "../Input_data/all_taxa_final.csv")
+```
+
+
+### Final Datasets
+
+```{r}
+# this pgls method being used in this analysis requires a taxon column rather than taxa in rownames
+eucs.data <- data.frame(eucs.data.prel) 
+cat.cols <- c("taxon", "dataset", "dataset2", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sprouting_Type3", "Sprouting_Type4", "Sieberi", "LO2")
+eucs.log.data <- eucs.data
+eucs.log.data[, !names(eucs.log.data) %in% cat.cols] <- lapply(eucs.log.data[, !names(eucs.log.data) %in% cat.cols], log10)
+eucs.scaled.data <- eucs.log.data
+eucs.scaled.data[, !names(eucs.scaled.data) %in% cat.cols] <- lapply(eucs.scaled.data[, !names(eucs.log.data) %in% cat.cols], scale)
+
+# now to save each of these as objects in r
+write.csv(eucs.data, file = "../Input_data/eucs_data.csv")
+write.csv(eucs.log.data, file = "../Input_data/eucs_log_data.csv")
+write.csv(eucs.scaled.data, file = "../Input_data/eucs_scaled_data.csv")
+
+# # just testing if applying the scale() function to LO2 gives the same answer when applied to 0-1 scaling and 0-2 scaling
+#   ## yes, it does
+# 
+# scale(eucs.scaled.data$LO2)
+# LO2.alt <- eucs.scaled.data$LO2
+# LO2.alt[LO2.alt == 2 & !is.na(LO2.alt)] <- 1
+# all.equal(scale(eucs.scaled.data$LO2), scale(LO2.alt))
+# test <- data.frame('scaled_0_2' = scale(eucs.scaled.data$LO2), 'scaled_0_1' = scale(LO2.alt))
+# sd(LO2.alt, na.rm = TRUE) # 0.43713
+# sd(eucs.scaled.data$LO2, na.rm = TRUE)# 0.87426
+```
+
+Our final datasets generated above include all the taxa that will be used in subsequent analysis but also an additional 5 taxa for which trait data is available but insufficient phylogenetic data could be found to include them on the tree. Hence, they were also excluded from the non-phylogenetic analysis for consistency, though they are included in the explorations below (including our map pdf)
+
+
+# Testing Stem Sprouter Position
+
+Here we see where in the dataset stem sprouters fall in order to decide if they're worth differentiating from other categories or can be absorbed into the combination resprouters or something, since there's only 4 of them. We're using similar code to the next section where we compared E. sieberi back when it was the only stem-only resprouter that we had. Now we have 4 of them, but E. sieberi is no longer one of them as new evidence suggests it can resprout from a lignotuber when stem diameter is up to ~10cm.
+
+
+```{r}
+# first to add an additional category to the data to delineate Stem-Only Resprouters
+stem.sprout.position.data <- as.data.frame(eucs.data[c("taxon", "max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_wall_width_mm", "fruit_mass_mg", "seed_mass_mg", "Sprouting_Type3")])
+stem.sprout.position.data$Sprouting_Type3 <- as.factor(stem.sprout.position.data$Sprouting_Type3)
+
+stemsp.mh <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = max_height_m, fill = Sprouting_Type3)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+
+stemsp.rh <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = relative_height_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(6, 10, 20, 30)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Height (m)", x = "")
+
+stemsp.sd <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = stem_density_g_per_ml, fill = Sprouting_Type3)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.51,0.55, 0.60, 0.70, 0.80)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Stem Sapwood Density (g/mL)", x = "")
+
+stemsp.rbt <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = relative_bt_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(2, 5, 10, 20, 40)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Bark Thickness (mm)", x = "")
+
+stemsp.sla <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = sla_mm2_per_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(2,4,8)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="SLA (mm2/mg)", x = "")
+
+stemsp.la <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = leaf_area_cm2, fill = Sprouting_Type3)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(3,10,30,100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Area (cm2)", x = "")
+
+stemsp.lm <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = leaf_mass_g, fill = Sprouting_Type3)) +
+  geom_point(aes(y = leaf_mass_g, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.1, 0.3, 1, 3)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Mass (g)", x = "")
+
+stemsp.fww <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = fruit_wall_width_mm, fill = Sprouting_Type3)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 1, 2, 4)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Wall Width (mm)", x = "")
+
+stemsp.fm <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = fruit_mass_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(50, 500, 5000)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Mass (mg)", x = "")
+
+stemsp.sm <- ggplot(data = stem.sprout.position.data, 
+         aes(x = Sprouting_Type3, y = seed_mass_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = seed_mass_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 5, 50)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
+
+
+pdf("../Output_figures/Testing_Stem_pos.pdf", width = 21, height = 30)
+grid.arrange(stemsp.mh, stemsp.rh, stemsp.sd, stemsp.rbt, stemsp.sla, stemsp.la, stemsp.lm, stemsp.fww, stemsp.fm, stemsp.sm, nrow = 4)
+dev.off()
+
+```
+
+
+
+# Testing Sieberi Position
+
+Since, we have included E. sieberi, the only stem-only resprouter in the dataset, in with the combination resprouters, we want to check how valid of an assumption that is based on where its trait values tend to fall. I want to know where in the distributions of combo sprouters it lies to see if it is an outlier w.r.t. any of the categories.
+
+```{r}
+# first to add an additional category to the data to delineate E. sieberi and call it a stem sprouter
+sieberi.position.data <- as.data.frame(eucs.data[c("taxon", "max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_wall_width_mm", "fruit_mass_mg", "seed_mass_mg", "Sprouting_Type")])
+sieberi.position.data$Sprouting_Type1.1 <- as.character(sieberi.position.data$Sprouting_Type)
+sieberi.position.data[sieberi.position.data$taxon == "Eucalyptus sieberi", names(sieberi.position.data) == "Sprouting_Type1.1"] <- "Stem_Sprouter"
+sieberi.position.data$Sprouting_Type1.1 <- as.factor(sieberi.position.data$Sprouting_Type1.1)
+
+sieberi.mh <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = max_height_m, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                               "Stem_Sprouter" = 'darkgreen', 
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+
+sieberi.rh <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = relative_height_by_girth, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(6, 10, 20, 30)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Height (m)", x = "")
+
+
+sieberi.sd <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = stem_density_g_per_ml, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(0.51,0.55, 0.60, 0.70, 0.80)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Stem Density (g/mL)", x = "")
+
+sieberi.rbt <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = relative_bt_by_girth, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(5, 10, 20, 40)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Bark Thickness (mm)", x = "")
+
+sieberi.sla <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = sla_mm2_per_mg, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(2,4,8)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="SLA (mm2/mg)", x = "")
+
+sieberi.la <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = leaf_area_cm2, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(3,10,30,100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Area (cm2)", x = "")
+
+sieberi.lm <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = leaf_mass_g, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = leaf_mass_g, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.1, 0.3, 1, 3)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Mass (g)", x = "")
+
+sieberi.fww <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = fruit_wall_width_mm, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 1, 2, 4)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Wall Width (mm)", x = "")
+
+sieberi.fm <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = fruit_mass_mg, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(50, 500, 5000)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Mass (mg)", x = "")
+
+
+sieberi.sm <- ggplot(data = sieberi.position.data, 
+         aes(x = Sprouting_Type1.1, y = seed_mass_mg, fill = Sprouting_Type1.1)) +
+  geom_point(aes(y = seed_mass_mg, color = Sprouting_Type1.1), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "blue",
+                              "Stem_Sprouter" = "darkgreen",   
+                              "Lignotuber_Only"="magenta",
+                              "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 5, 50)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
+
+pdf("../Output_figures/sieberi_position.pdf", width = 21, height = 30)
+grid.arrange(sieberi.mh, sieberi.rh, sieberi.sd, sieberi.rbt, sieberi.sla, sieberi.la, sieberi.lm, sieberi.fww, sieberi.fm, sieberi.sm, nrow = 4)
+dev.off()
+```
+
+
+# Sampling Map
+
+```{r}
+# plainest black
+ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude, latitude),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.9, alpha = 0.5, color = 'black', pch = 17) +
+  xlab("Longitude") +
+  ylab("Latitude")
+
+pdf('../Output_figures/map_of_collecting_locations.pdf')
+ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude, latitude),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 2, alpha = 0.5, color = 'black', pch = 17)
+dev.off()
+
+png('../Output_figures/map_of_collecting_locations.png')
+ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
+    aes(longitude, latitude),
+    trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 2, alpha = 0.5, color = 'black', pch = 17)
+dev.off()
+```
+
