@@ -1,0 +1,1320 @@
+---
+title: "Fire Correlations"
+output: html_notebook
+---
+
+# Introduction
+
+The purpose of the following notebook is to use pgls to test the nature of correlations of continuous measured traits with sprouting type (i.e. fire response) of Eucalypt taxa. This version excludes our 4 stem-only resprouting taxa from any comparisons.
+
+# Required Packages, Functions and Data
+
+```{r}
+# Packages
+library(ape)
+library(caper)
+library(ggplot2)
+library(gridExtra)
+
+# Functions
+extract_slope <- function(model) {
+  x <- summary(model)
+  slope.coeff <- x$coefficients[2,1]
+  return(slope.coeff)
+}                   
+
+extract_SE2 <- function(model) {
+  x <- summary(model)
+  slope.SE <- x$coefficients[2,2]
+  return(slope.SE)
+}
+
+extract_P2 <- function(model) {
+  x <- summary(model)
+  P <- x$coefficients[2,c('Pr(>|t|)')]
+  return(P)
+}
+
+extract_n <- function(model) {
+  x <- summary(model)
+  n <- x$df[[2]]
+  return(n)
+}
+
+## the following is for extracting the calculated r-squared value from a pgls regression model, especially useful when list-applied to many models simultaneously
+r_squared <- function(model) {
+  x <- summary(model)
+  x$r.squared
+}
+
+# Data Import
+eucs.data <- read.csv("../Input_data/eucs_data.csv")
+eucs.data <- subset(eucs.data, select = -c(X))
+eucs.data[c("Sprouting_Type")] <- as.factor(eucs.data$Sprouting_Type)
+eucs.data[c("Sprouting_Type")] <- as.factor(eucs.data$Sprouting_Type)
+
+eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
+eucs.log.data <- subset(eucs.log.data, select = -c(X))
+eucs.log.data[c("Sprouting_Type")] <- as.factor(eucs.log.data$Sprouting_Type)
+eucs.log.data[c("Sprouting_Type2")] <- as.factor(eucs.log.data$Sprouting_Type2)
+
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+eucs.scaled.data <- subset(eucs.scaled.data, select = -c(X))
+eucs.scaled.data[c("Sprouting_Type")] <- as.factor(eucs.scaled.data$Sprouting_Type)
+eucs.scaled.data[c("Sprouting_Type2")] <- as.factor(eucs.scaled.data$Sprouting_Type2)
+```
+
+
+# Data Preparation
+
+```{r fig.height = 30, fig.width = 15}
+#input the phylogenetc hypothesis to be used
+tree <- read.tree("../Input_data/final_tree.txt")
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+eucs.test.tree <- tree 
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1) #give the tree branch lengths that
+#plot_dim1(eucs.test.tree)
+
+# now to convert all the stem-only resprouters to NA values as we discussed in both the Sprouting_Type variable and Sprouting_Type2
+eucs.data$Sprouting_Type[eucs.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.data$Sprouting_Type)] <- NA
+eucs.log.data$Sprouting_Type[eucs.log.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.log.data$Sprouting_Type)] <- NA
+eucs.scaled.data$Sprouting_Type[eucs.scaled.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.scaled.data$Sprouting_Type)] <- NA
+
+eucs.data$Sprouting_Type2[eucs.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.data$Sprouting_Type2)] <- NA
+eucs.log.data$Sprouting_Type2[eucs.log.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.log.data$Sprouting_Type2)] <- NA
+eucs.scaled.data$Sprouting_Type2[eucs.scaled.data$Sprouting_Type3 == 'Stem_Only' & !is.na(eucs.scaled.data$Sprouting_Type2)] <- NA
+
+
+# Preparing the matching objects that allow the pgls package to link data frames to tree tips for phylogenetic correlations later
+##for the un-transformed data
+eucs.test <- eucs.test <- comparative.data(phy = eucs.test.tree, data = eucs.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.test$dropped$unmatched.rows # none so all good as taxa not on tree have been removed
+eucs.test$dropped$tips #none as no tips on the tree are redundant
+
+##for the log-transformed data
+eucs.log.obj <- eucs.log.obj <- comparative.data(phy = eucs.test.tree, data = eucs.log.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.log.obj$dropped$unmatched.rows 
+
+##for the scaled data
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.scaled.obj$dropped$unmatched.rows
+```
+
+
+# Analyses
+
+## OLS
+
+### Effect of Resprouting Ability
+
+```{r}
+mh.resprout <- lm(max_height_m ~ Sprouter, data = eucs.scaled.data)
+summary(mh.resprout)
+```
+
+
+```{r}
+rh.resprout <- lm(relative_height_by_girth ~ Sprouter, data = eucs.scaled.data)
+summary(rh.resprout)
+```
+
+
+```{r}
+sd.resprout <- lm(stem_density_g_per_ml ~ Sprouter, data = eucs.scaled.data)
+summary(sd.resprout)
+```
+
+
+```{r}
+rbt.resprout <- lm(relative_bt_by_girth ~ Sprouter, data = eucs.scaled.data)
+summary(rbt.resprout)
+```
+
+
+```{r}
+sla.resprout <- lm(sla_mm2_per_mg ~ Sprouter, data = eucs.scaled.data)
+summary(sla.resprout)
+```
+
+
+```{r}
+la.resprout <- lm(leaf_area_cm2 ~ Sprouter, data = eucs.scaled.data)
+summary(la.resprout)
+```
+
+
+```{r}
+lm.resprout <- lm(leaf_mass_g ~ Sprouter, data = eucs.scaled.data)
+summary(lm.resprout)
+```
+
+
+```{r}
+fww.resprout <- lm(fruit_wall_width_mm ~ Sprouter, data = eucs.scaled.data)
+summary(fww.resprout)
+```
+
+
+```{r}
+fm.resprout <- lm(fruit_mass_mg ~ Sprouter, data = eucs.scaled.data)
+summary(fm.resprout)
+```
+
+
+```{r}
+sm.resprout <- lm(seed_mass_mg ~ Sprouter, data = eucs.scaled.data)
+summary(sm.resprout)
+```
+
+Max. height and relative height are the only two traits that showed significant difference between obligate seeders and resprouters for the OLM analysis. Both were higher in obligate seeders.
+
+
+
+### Individual Category Comparisons
+
+#### Ref. Class Ob-Seeders
+
+Now to run the individual comparisons between obligate seeders and either combination resprouters or lignotuber-only resprouters. We need to alter the contrasts within the factor variable to make the obligate seeder category the reference class.
+
+```{r}
+eucs.scaled.data2 <- eucs.scaled.data #creates an alternate data frame just for this analysis that has different contrasts for the three-level categorical sprouting variables
+class(eucs.scaled.data$Sprouting_Type)
+contrasts(eucs.scaled.data2$Sprouting_Type) <- as.matrix(data.frame('Lignotuber_Only' = c(0, 1, 0), 'Combination_Sprouter' = c(1, 0, 0), row.names = levels(eucs.scaled.data2$Sprouting_Type)))
+```
+
+
+```{r}
+summary(lm(max_height_m ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(relative_height_by_girth ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(stem_density_g_per_ml ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(relative_bt_by_girth ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(sla_mm2_per_mg ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(leaf_area_cm2 ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(leaf_mass_g ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(fruit_wall_width_mm ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(fruit_mass_mg ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+
+```{r}
+summary(lm(seed_mass_mg ~ Sprouting_Type, data = eucs.scaled.data2))
+```
+
+Obligate Seeders different from basal-only resprouters by having larger MH, larger RH, smaller SD, larger RBT!, larger SLA and larger LA + (new since Pauline's draft) larger leaf mass.
+
+Max height NON-SIGNIFICANT (but borderline) difference between obligate seeders and combination sprouters like it is in the PGLS version. 
+Otherwise, only RH was significantly different between the obligate seeders and combination sprouters.
+
+
+#### Ref. Class Combo sprouts
+
+Now we're using the default contrasts that sets combination resprouters as the reference category (alphabetical order).
+
+```{r}
+contrasts(eucs.scaled.data$Sprouting_Type)
+summary(lm(max_height_m ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+
+```{r}
+summary(lm(max_height_m ~ Sprouting_Type, data = eucs.scaled.data))
+```
+Weakened in PGLS -1.5 and r2 = 0.40
+
+```{r}
+summary(lm(relative_height_by_girth ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Practically the same in PGLS
+
+```{r}
+summary(lm(stem_density_g_per_ml ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Slightly weakened in PGLS 0.65 and r2 = 0.068
+
+```{r}
+summary(lm(relative_bt_by_girth ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Practically the same in PGLS
+
+```{r}
+summary(lm(sla_mm2_per_mg ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Weakened significantly by PGLS down to -0.91 and r2 = 0.13
+
+
+```{r}
+summary(lm(leaf_area_cm2 ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+ Weakened in PGLS -1.15 and r2 = 0.20
+
+```{r}
+summary(lm(leaf_mass_g ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Practically the same in PGLS
+
+```{r}
+summary(lm(fruit_wall_width_mm ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Slightly weakened in PGLS 0.53 and r2 = 0.041
+
+```{r}
+summary(lm(fruit_mass_mg ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Weakened significantly by PGLS 0.13 and r2 = 0.010
+
+
+```{r}
+summary(lm(seed_mass_mg ~ Sprouting_Type, data = eucs.scaled.data))
+```
+
+Weakened significantly to non-significance by PGLS 0.12 and r2 = 0.008
+
+Basal-only resprouters are shorter, stouter, have denser wood, thinner bark, lower-sla smaller and lighter leaves, thicker fruit walls AS WELL as HEAVIER FRUITS and SEEDS than combination sprouters.
+Now heavier fruits no longer significant
+
+## PGLS
+
+### Effect of Resprouting Ability
+
+```{r}
+max.height.fire <- pgls(max_height_m ~ Sprouter, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.fire)
+```
+
+
+```{r}
+rel.height.fire <- pgls(relative_height_by_girth ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.fire)
+```
+
+
+```{r}
+stem.density.fire <- pgls(stem_density_g_per_ml ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.fire)
+#plot(stem_density_g_per_ml ~ Sprouter, data = eucs.scaled.data)
+```
+
+
+```{r}
+bark.fire <- pgls(relative_bt_by_girth ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.fire)
+```
+
+
+```{r}
+sla.fire <- pgls(sla_mm2_per_mg ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.fire)
+```
+
+
+```{r}
+leaf.area.fire <- pgls(leaf_area_cm2 ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.fire)
+```
+
+
+```{r}
+leaf.mass.fire <- pgls(leaf_mass_g ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.fire)
+```
+
+
+```{r}
+fruit.wall.fire <- pgls(fruit_wall_width_mm ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.fire)
+plot(fruit_wall_width_mm ~ Sprouter, data = eucs.log.data)
+```
+
+
+```{r}
+fruit.mass.fire <- pgls(fruit_mass_mg ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML',  bounds = list(lambda = c(0.001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(fruit.mass.fire)
+```
+
+
+```{r}
+seed.mass.fire <- pgls(seed_mass_mg ~ Sprouter, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.fire)
+```
+
+Only Max. Height and Relative Height were significantly different between obligate seeders and sprouters. Both were higher in obligate seeders.
+
+### Individual Category Comparisons
+
+#### Ref. Class Ob-seeders
+
+First need to set the contrasts within the Sprouting Type variable to treat Obligate seeders as the reference category.
+
+```{r}
+eucs.scaled.obj2 <- eucs.scaled.obj
+contrasts(eucs.scaled.obj2$data$Sprouting_Type) <- as.matrix(data.frame('Lignotuber_Only' = c(0, 1, 0), 'Combination_Sprouter' = c(1, 0, 0), row.names = row.names(contrasts(eucs.scaled.obj2$data$Sprouting_Type))))
+```
+
+
+```{r}
+summary(pgls(max_height_m ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+# summary(pgls(max_height_m ~ Sprouting_Type, data = eucs.scaled.obj.con, lambda = 'ML'))
+# contrasts(eucs.scaled.obj.con$data$Sprouting_Type)
+```
+
+
+```{r}
+summary(pgls(relative_height_by_girth ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+```{r}
+summary(pgls(stem_density_g_per_ml ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+```{r}
+summary(pgls(relative_bt_by_girth ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+```{r}
+summary(pgls(sla_mm2_per_mg ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+
+```
+
+```{r}
+summary(pgls(leaf_area_cm2 ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+```{r}
+summary(pgls(leaf_mass_g ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+```{r}
+summary(pgls(fruit_wall_width_mm ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+
+```{r}
+summary(pgls(fruit_mass_mg ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+
+```{r}
+summary(pgls(seed_mass_mg ~ Sprouting_Type, data = eucs.scaled.obj2, lambda = 'ML'))
+```
+
+Max. Height (and now RH) are the only traits that is different between obligate seeders and combination resprouters, MH was not significant in the OLS analysis.
+MH shorter, RH stouter, SD denser, RBT thinner, SLA smaller,  LA smaller, and now LM lighter were different for basal-only resprouters compared to ob-seeders. Note FWW was not different, though this is the same as the OLM analysis.
+
+
+#### Ref. Class Combo Sprouts
+
+
+The following method does not employ Helmert contrasts and the like but simply uses the default contrasts when the three categories are treated as three levels of a single categorical variable, which sets Combination_Sprouter as the reference class and the others are represented by their difference to it. This allows the measurement of the difference between the obligate seeders and combination sprouters as well.
+
+```{r}
+# quich verification that contrasts place combination resprouters as the reference category
+contrasts(eucs.scaled.obj$data$Sprouting_Type)
+
+# start the correlations
+phy.comboref.mh <-pgls(max_height_m ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.mh)
+```
+
+
+```{r}
+phy.comboref.rh <- pgls(relative_height_by_girth ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.rh)
+```
+
+```{r}
+phy.comboref.sd <- pgls(stem_density_g_per_ml ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.sd)
+```
+
+```{r}
+phy.comboref.rbt <- pgls(relative_bt_by_girth ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.rbt)
+```
+
+```{r}
+phy.comboref.sla <- pgls(sla_mm2_per_mg ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.sla)
+```
+
+```{r}
+phy.comboref.la <- pgls(leaf_area_cm2 ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.la)
+```
+
+```{r}
+phy.comboref.lm <- pgls(leaf_mass_g ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.lm)
+```
+
+```{r}
+phy.comboref.fww <- pgls(fruit_wall_width_mm ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.fww)
+```
+
+```{r}
+phy.comboref.fm <- pgls(fruit_mass_mg ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.fm)
+```
+
+```{r}
+phy.comboref.sm <- pgls(seed_mass_mg ~ Sprouting_Type, data = eucs.scaled.obj, lambda = 'ML')
+summary(phy.comboref.sm)
+```
+
+Differences between combinations resprouters and basal-only resprouters were very similar with the addition of FWW (thicker) also being additionally different to when basal-repsrouters were compared to obligate seeders instead.
+Compared to the OLS analysis, the significantly heavier seeds and fruits of lignotuber-only resprouters vs lighter in combination resprouters was no longer significant and the heavier FWW of ligno-sprouters was weakened until only borderline significant.
+
+## Checking variably sprouting taxa
+
+First need to check the contrasts within the Sprouting Type variable for the comparison where combination resprouters are the reference category as that had the most interesting information.
+
+```{r}
+# the following should show a 0 0 for the row for combination resprouters
+contrasts(eucs.scaled.obj$data$Sprouting_Type2)
+```
+
+
+```{r}
+variables.test.mh <- pgls(max_height_m ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.mh)
+# summary(pgls(max_height_m ~ Sprouting_Type, data = eucs.scaled.obj.con, lambda = 'ML'))
+# contrasts(eucs.scaled.obj.con$data$Sprouting_Type)
+```
+
+
+```{r}
+variables.test.rh <- pgls(relative_height_by_girth ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.rh)
+```
+
+```{r}
+variables.test.sd <- pgls(stem_density_g_per_ml ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.sd)
+```
+
+```{r}
+variables.test.rbt <- pgls(relative_bt_by_girth ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.rbt)
+```
+
+```{r}
+variables.test.sla <- pgls(sla_mm2_per_mg ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.sla)
+
+```
+
+```{r}
+variables.test.la <- pgls(leaf_area_cm2 ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.la)
+```
+
+```{r}
+variables.test.lm <- pgls(leaf_mass_g ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.lm)
+```
+
+```{r}
+variables.test.fww <- pgls(fruit_wall_width_mm ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.fww)
+```
+
+
+```{r}
+variables.test.fm <- pgls(fruit_mass_mg ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.fm)
+```
+
+
+```{r}
+variables.test.sm <- pgls(seed_mass_mg ~ Sprouting_Type2, data = eucs.scaled.obj, lambda = 'ML')
+summary(variables.test.sm)
+```
+
+Max. Height is the only trait that is different between obligate seeders and combination resprouters, this was not true for the OLM analysis.
+MH shorter, RH stouter, SD denser, RBT thinner, SLA smaller and LA smaller were different between obligate seeders and basal-only resprouters. Note LM and FWW were not different, though this is the same as the OLM analysis.
+
+### Extracting data
+
+```{r}
+variables.tests <- list(variables.test.mh, variables.test.rh, variables.test.sd, variables.test.rbt, variables.test.sla, variables.test.la, variables.test.lm, variables.test.fww, variables.test.fm, variables.test.sm)
+
+
+variables.coeff1 <- data.frame('Effect_Size' = unlist(lapply(variables.tests, extract_slope)), 'S.E.' = unlist(lapply(variables.tests, extract_SE2)) )
+
+class(extract_n(variables.test.mh))
+summary(variables.test.mh)
+full.coeff.excl.vars <- data.frame('Trait' = c('MH', 'RH', 'SD', 'RBT', 'SLA', 'LA', 'LM', 'FWW', 'FM', 'SM'), 'Slope' = paste(variables.coeff1$Effect_Size, variables.coeff1$S.E., sep=" ± "), "R2" = unlist(lapply(variables.tests, r_squared)), "n" = unlist(lapply(variables.tests, extract_n)) + 2, "P_value" = unlist(lapply(variables.tests, extract_P2)))
+
+# combined.coeff.excl.vars <- data.frame('Variable_Taxa_Excluded' = lapply(paste(full.coeff.excl.vars$Slope, full.coeff.excl.vars$R2, full.coeff.excl.vars$n, full.coeff.excl.vars$P_value, sep = "\n"), cat))
+# 
+# cat(paste(full.coeff.excl.vars$n, full.coeff.excl.vars$R2, sep = "\n"))
+
+# NEXT WE NEED TO DO THE SAME WITH THE NORMAL PGLS THAT INCLUDES THE VARIABLE TAXA WITHIN COMBO SPROUTERS AND THEN ADD THE R-VALUE AND MAYBE P-VALES INTO THE SAME CELL VIA THE "\n" IN THE PASTE FUNCTION
+
+pgls.comboref.models <- list(phy.comboref.mh, phy.comboref.rh, phy.comboref.sd, phy.comboref.rbt, phy.comboref.sla, phy.comboref.la, phy.comboref.lm, phy.comboref.fww, phy.comboref.fm, phy.comboref.sm)
+
+pgls.comboref.coeff <- data.frame('Effect_Size_incl' = unlist(lapply(pgls.comboref.models, extract_slope)), 'S.E.incl' = unlist(lapply(pgls.comboref.models, extract_SE2)))
+
+full.coeff.incl.vars <- data.frame("Traits" = c('MH', 'RH', 'SD', 'RBT', 'SLA', 'LA', 'LM', 'FWW', 'FM', 'SM'), 'Slope' = paste(pgls.comboref.coeff$Effect_Size_incl, pgls.comboref.coeff$S.E.incl, sep=" ± "), "R2" = unlist(lapply(pgls.comboref.models, r_squared)), "n" = unlist(lapply(pgls.comboref.models, extract_n)) + 2, "P_value" = unlist(lapply(pgls.comboref.models, extract_P2)))
+
+write.csv(full.coeff.incl.vars, file = "../Output_figures/incl_variable_taxa.csv")
+write.csv(full.coeff.excl.vars, file = "../Output_figures/excl_variable_taxa.csv")
+# write.table(full.coeff.incl.vars, file = "Output_figures/incl_variable_taxa", eol = ',', sep = ',')
+# write.table(t(full.coeff.excl.vars), file = "Output_figures/excl_variable_taxa", eol = ',', row.names = FALSE)
+
+# A = 'hi\nand'
+# cat(A)
+```
+
+R2 values comparison
+    OLS     PGLS
+MH  0.56		0.40
+RH  0.10		0.10
+SD  0.15		0.07
+RBT 0.22		0.22
+SLA 0.37		0.13
+LA  0.36		0.20
+LM  0.11		0.11
+FWW 0.11		0.04
+FM  0.03		0.01
+SM  0.04		0.01
+
+# Plots
+
+The following is an exploration of the different possible methods of visualising the above results. For the final version used in the paper skip the the relevant subheadings within the heading "Without the NA column".
+
+## Just Dots
+
+```{r}
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = max_height_m, fill = Sprouting_Type)) + geom_point(aes(y = max_height_m, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.9) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip() 
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = relative_height_by_girth, fill = Sprouting_Type)) + geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed = 1), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = stem_density_g_per_ml, fill = Sprouting_Type)) + geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type), position = position_jitter(width = .15, seed = 1), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = relative_bt_by_girth, fill = Sprouting_Type)) + geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed = 1), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = sla_mm2_per_mg, fill = Sprouting_Type)) + geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = leaf_area_cm2, fill = Sprouting_Type)) + geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = leaf_mass_g, fill = Sprouting_Type)) + geom_point(aes(y = leaf_mass_g, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = fruit_wall_width_mm, fill = Sprouting_Type)) + geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = fruit_mass_mg, fill = Sprouting_Type)) + geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = seed_mass_mg, fill = Sprouting_Type)) + geom_point(aes(y = seed_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15), size = 1.5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+
+# beeswarm(fruit_mass_mg ~ Regen..Strategy, data = boxplot.log.data, horizontal = TRUE, col = c("Green", "Blue", "Orange"))
+# beeswarm(seed_mass_mg ~ Regen..Strategy, data = boxplot.log.data, horizontal = TRUE, col = c("Green", "Blue", "Orange"))
+# 
+# ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = fruit_mass_mg, fill = Sprouting_Type)) + geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type), size = .5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+# 
+# ggplot(data = eucs.scaled.data, aes(x = Sprouting_Type, y = seed_mass_mg, fill = Sprouting_Type)) + geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type), position = position_jitter(width = 0.1, seed = 1), size = .5, alpha = 0.8) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+# 
+# stripchart(eucs.scaled.data$seed_mass_mg ~ eucs.scaled.data$Sprouting_Type, col = c("Orange", "Green", "Blue"))
+# 
+# ggplot(eucs.scaled.data, aes(x=Sprouting_Type, y=seed_mass_mg)) + geom_point(size = 3) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + coord_flip()
+#   geom_jitter(position=position_jitter(0.2))
+
+```
+The jitter gives the data a vertical dimension at a randomo height such that we can see the data a lot more clearly and where it is more or less dense.
+
+But it ay be better to include the boxplot to this data too or simply just the whole raincloud plot.
+
+
+## Dot-and-box Plots
+
+Now just with the datapoints along with the boxplot and no density violin plot
+
+```{r}
+pdf("../Output_figures/boxplot_fire_response_vs_traits.pdf")
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = max_height_m, fill = Sprouting_Type)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Maximum Height", x = "Post-Fire Regeneration Strategy") +
+  coord_flip()
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = relative_height_by_girth, fill = Sprouting_Type)) +
+  geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Relative Height by Girth", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = stem_density_g_per_ml, fill = Sprouting_Type)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Stem Density", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = relative_bt_by_girth, fill = Sprouting_Type)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Relative Bark Thickness by Girth", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = sla_mm2_per_mg, fill = Sprouting_Type)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="SLA", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = leaf_area_cm2, fill = Sprouting_Type)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Leaf Area", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = leaf_mass_g, fill = Sprouting_Type)) +
+  geom_point(aes(y = leaf_mass_g, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Leaf Mass", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = fruit_wall_width_mm, fill = Sprouting_Type)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Fruit Wall Width", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+  
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = fruit_mass_mg, fill = Sprouting_Type)) +
+  geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Fruit Mass", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = seed_mass_mg, fill = Sprouting_Type)) +
+  geom_point(aes(y = seed_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c(NA, "Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Seed Mass", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+dev.off()
+```
+
+## Without the NA column
+
+### For looking at all
+```{r}
+pdf("../Output_figures/boxplot_fire_response_vs_traits.pdf")
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = max_height_m, fill = Sprouting_Type)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) + 
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Maximum Height (m)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) +coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = relative_height_by_girth, fill = Sprouting_Type)) +
+  geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Relative Height by Girth (m)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(6, 12, 24)) + 
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = stem_density_g_per_ml, fill = Sprouting_Type)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Stem Density (g/mL)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(0.55, 0.65, 0.75, 0.85)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = relative_bt_by_girth, fill = Sprouting_Type)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Relative Bark Thickness by Girth", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(5, 10, 20, 40)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = sla_mm2_per_mg, fill = Sprouting_Type)) + geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y = "SLA (mm2/mg)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(2, 4, 8)) + 
+    coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+
+  
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = leaf_area_cm2, fill = Sprouting_Type)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Leaf Area (cm2)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(3, 10, 30, 100)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = leaf_mass_g, fill = Sprouting_Type)) +
+  geom_point(aes(y = leaf_mass_g, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Leaf Mass (g)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(0.1, 0.5, 2.5)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = fruit_wall_width_mm, fill = Sprouting_Type)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Fruit Wall Width (mm)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(0.5, 1, 2, 3, 4)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+  
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = fruit_mass_mg, fill = Sprouting_Type)) +
+  geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Fruit Mass (mg)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(50, 500, 5000)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = seed_mass_mg, fill = Sprouting_Type)) +
+  geom_point(aes(y = seed_mass_mg, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Seed Mass (mg)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(0.5, 5, 50)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) 
+dev.off()
+```
+#### For testing what axis labels on log scale look most natural
+
+```{r}
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type, y = max_height_m, fill = Sprouting_Type)) +
+   geom_point(aes(y = max_height_m, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "blue",
+                                 "Lignotuber_Only"="magenta",
+                                 "Obligate_Seeder"="brown")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) + 
+  guides(fill = FALSE) + 
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "blue",
+                                "Lignotuber_Only"="magenta",
+                                "Obligate_Seeder"="brown")) + 
+  scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination Resprouter", "Obligate Seeder", "Basal-Only Resprouter")) + labs(y="Maximum Height (m)", x = "Post-Fire Regeneration Strategy") + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) +coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"))
+```
+
+### For presentation
+```{r}
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = max_height_m, fill = Sprouting_Type)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + labs(y="Maximum Height", x = "Post-Fire Regeneration Strategy") + theme(axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20)) +
+  coord_flip() 
+
+
+ggplot(data = eucs.scaled.data, 
+         aes(x = Sprouting_Type, y = relative_bt_by_girth, fill = Sprouting_Type)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + scale_x_discrete(limits = c("Combination_Sprouter", "Obligate_Seeder", "Lignotuber_Only")) + theme(axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20)) + labs(y="Relative Bark Thickness by Girth", x = "Post-Fire Regeneration Strategy") +
+  coord_flip() 
+
+
+theme(axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20)) +labs(y= "Pagels Lambda")
+```
+
+
+
+## Including Stem-Only Resprouters
+
+
+### For Paper
+
+```{r}
+#pdf("../Output_figures/MH_boxplots.pdf")
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = max_height_m, fill = Sprouting_Type3)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) +coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15, angle = 45)) + labs(x="", y = "Maximum Height (m)")
+#dev.off()
+
+#pdf("../Output_figures/RBT_boxplots.pdf")
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = relative_bt_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(5, 10, 20, 40)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15, angle = 45)) + labs(y = "Relative Bark Thickness/100cm Girth", x = "")
+#dev.off()
+
+#pdf("../Output_figures/SLA_boxplots.pdf")
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = sla_mm2_per_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(2, 4, 8)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15, angle = 45), axis.title.x = element_text(size = 15)) + labs(y = "SLA (mm2/mg)", x = "")
+#dev.off()
+
+#pdf("../Output_figures/FWW_boxplots.pdf")
+ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = fruit_wall_width_mm, fill = Sprouting_Type3)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 1.5, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 1, 2, 3, 4)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 15), axis.text.y = element_text(size = 15, angle = 45), axis.title.x = element_text(size = 15)) + labs(y = "Fruit Wall Width (mm)", x = "")
+#dev.off()
+
+
+
+
+# All on same plot:
+
+
+MH.boxplot.paper <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = max_height_m, fill = Sprouting_Type3)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) +coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+#, hjust = c(0, 0.7, 0) for moving the ctaegory labels a tad to the left
+
+
+RBT.boxplot.paper <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = relative_bt_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size =2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(5, 10, 20, 40)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size=25, vjust = -1.5), plot.margin = margin(1,b=2,1,1, "cm")) + labs(y = "Relative Bark Thickness (mm)", x = "")
+
+SLA.boxplot.paper <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = sla_mm2_per_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(2, 4, 8)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(1,b=2,1,1, "cm")) + labs(y = "SLA (mm2/mg)", x = "") 
+
+LA.boxplot.paper <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = leaf_area_cm2, fill = Sprouting_Type3)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) + stat_boxplot(geom ='errorbar', width = 0.25) +
+  expand_limits(x = 3.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(breaks = eucs.data$Sprouting_Type, 
+                    values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("", "", "", "")) + scale_y_continuous(trans = "log10", breaks = c(3,10,30,100)) +
+  coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(1,b=2,1,1, "cm")) + labs(y = "Leaf Area (cm2)", x = "")
+
+pdf("../Output_figures/multi_boxplots.pdf", width = 30, height = 9)
+grid.arrange(MH.boxplot.paper, RBT.boxplot.paper, SLA.boxplot.paper, LA.boxplot.paper, nrow = 1)
+dev.off()
+```
+
+
+### For Supp. Mat.
+
+We've decided that we would like to have all boxplots in the supps even though some of them have allready been seen in fig 6 in the main text.
+
+```{r}
+suppmat.mh <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = max_height_m, fill = Sprouting_Type3)) +
+  geom_point(aes(y = max_height_m, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(1, 3, 10, 30, 100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+
+suppmat.rh <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = relative_height_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_height_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(6, 10, 20, 30)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Height (m)", x = "")
+
+suppmat.sd <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = stem_density_g_per_ml, fill = Sprouting_Type3)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.51,0.55, 0.60, 0.70, 0.80)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Stem Sapwood Density (g/mL)", x = "")
+
+suppmat.rbt <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = relative_bt_by_girth, fill = Sprouting_Type3)) +
+  geom_point(aes(y = relative_bt_by_girth, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(2, 5, 10, 20, 40)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Bark Thickness (mm)", x = "")
+
+suppmat.sla <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = sla_mm2_per_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(2,4,8)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="SLA (mm2/mg)", x = "")
+
+suppmat.la <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = leaf_area_cm2, fill = Sprouting_Type3)) +
+  geom_point(aes(y = leaf_area_cm2, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(3,10,30,100)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Area (cm2)", x = "")
+
+suppmat.lm <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = leaf_mass_g, fill = Sprouting_Type3)) +
+  geom_point(aes(y = leaf_mass_g, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.1, 0.3, 1, 3)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Mass (g)", x = "")
+
+suppmat.fww <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = fruit_wall_width_mm, fill = Sprouting_Type3)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 1, 2, 4)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Wall Width (mm)", x = "")
+
+suppmat.fm <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = fruit_mass_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = fruit_mass_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(50, 500, 5000)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Mass (mg)", x = "")
+
+suppmat.sm <- ggplot(data = eucs.data, 
+         aes(x = Sprouting_Type3, y = seed_mass_mg, fill = Sprouting_Type3)) +
+  geom_point(aes(y = seed_mass_mg, color = Sprouting_Type3), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 5.25) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Combination_Sprouter" = "#CC4778FF",
+                              "Stem_Only" = "#F89540FF",   
+                              "Lignotuber_Only"="#7E03A8FF",
+                              "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 5, 50)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
+
+
+pdf('../Output_figures/suppmat_boxplots.pdf', width = 21, height = 30)
+grid.arrange(suppmat.mh, suppmat.rh, suppmat.sd, suppmat.rbt, suppmat.sla, suppmat.la, suppmat.lm, suppmat.fww, suppmat.fm, suppmat.sm, nrow = 4)
+dev.off()
+```
+
+
