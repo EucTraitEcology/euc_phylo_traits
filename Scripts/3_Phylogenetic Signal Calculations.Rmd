@@ -54,19 +54,19 @@ divide_ci <- function(ci.val) {
   return(bounds.split)
 }
 
-
-
 # data
 eucs.data <- read.csv("../Input_data/eucs_data.csv")
 eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
 eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+
+# phylogenetic tree
+tree <- read.tree("../Input_data/final_tree.txt")
 ```
 
 ## Data Preparation
 
 ```{r fig.width = 15, fig.height = 25}
-# First to read in the newick file of the final.tree decided on at the end of script 2
-tree <- read.tree("../Input_data/final_tree.txt")
+# First to get the imported phylogeny into correct form for joining with trait data
 ## remove some erroneous node labels that cause issues later in case they appear
 tree$node.label <- NULL
 ## converts tip names back into space-separated rather than underscore (the default when reading from newick format)
