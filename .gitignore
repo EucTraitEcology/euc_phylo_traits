@@ -1,0 +1,10 @@
+.Rproj.user
+.Rhistory*
+.RData*
+.Ruserdata
+.Rapp.history
+Icon*
+Rendered_Notebooks/
+Input_data/
+Output_figures/
+Figures_final/
