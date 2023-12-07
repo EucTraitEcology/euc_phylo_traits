@@ -1,0 +1,1662 @@
+---
+title: "Non-phylogenetic Analysis and Plots"
+output: html_notebook
+---
+
+# Introduction
+
+This notebook aims to fit ordinary linear regression models in order to determine the nature of the relationships between the 10 continuous traits WITHOUT assuming any phylogenetic affect (i.e. assuming independence of data points despite being measured in closely related species. This can then be compared to the similar analysis using pgls to determine the effect of phylogeny on the results calculated. Since this is a simple linear regression, the parameters should be the same when the axes are reversed and hence only half the number of pairwise correlations need to be carried out for determining p-value and r-squared, though that is not true for the slope coefficient so all axis arrangements were run anyway.
+
+The dataset has been pruned to only include the 160 taxa used in the pgls analysis for comparability. Note: this means the tree is required input for this script so make sure the newick file for that has been created previously (and is in the input location) before attempting to run this code.
+
+This notebook also aims to create network diagrams and an ellipse table to represent the results and compare to the phylogenetic analysis. Also, perhaps even determine how to tweak the graphs such that similar code can be used to plot the phylogenetic analysis results.
+
+# Required Packages, Functions, and Data
+
+```{r}
+# Packages
+library(corrplot)
+library(qgraph)
+library(ggplot2)
+
+# Functions
+
+extract_P <- function(model) {
+  # extracts the P-value for the slope coefficient of the independent variable in a bvariate correlation
+  x <- summary(model)
+  P <- x$coefficients[c(as.character(x$call$formula[[3]])), c('Pr(>|t|)')]
+  return(P)
+}
+
+## the following allows extraction of the slope coefficient of a pgls regression model, especially useful when list-applied to a large number of models simlutaneously
+extract_slope <- function(model) {
+  x <- summary(model)
+  x$coefficients[2,1]
+}
+
+extract_SE <- function(model) { 
+  # this extract the standard error of the slope coefficient for a single independent variable (or maybe the first one mentioned if there are more than one but it is untested in those cases)
+  x <- summary(model)
+  s.e.val <- x$coefficients[c(as.character(x$call$formula[[3]])),c('Std. Error')]
+  return(s.e.val)
+}
+
+extract_n <- function(model) {
+  x <- summary(model)
+  n <- x$df[[2]]
+  return(n)
+}
+
+## the following is for extracting the calculated r-squared value from a pgls regression model, especially useful when list-applied to many models simultaneously
+r_squared <- function(model) {
+  x <- summary(model)
+  x$r.squared
+}
+
+## rounding function
+num_round <- function(x){
+  x_num <- as.numeric(x)
+  out <- round(x_num, 3)
+  return(out)
+}
+
+
+# Data import
+eucs.data <- read.csv("../Input_data/eucs_data.csv")
+eucs.data <- subset(eucs.data, select = -c(X))
+eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
+eucs.log.data <- subset(eucs.log.data, select = -c(X))
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+eucs.scaled.data <- subset(eucs.scaled.data, select = -c(X))
+
+## the following are summary objects from the phylogenetic analysis for comparison
+load("~/Dropbox/Eucs_phylo_traits/Input_data/matrix_r.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/matrix_r_half.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/sig_only_r_half.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/network_r3_obj.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/lambda_matrix.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/lambda_matrix_half.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/pgls_coeff_matrix.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/pgls_coeff_matrix_half.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/pgls_sig_models.RData")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/halving_logical.RData")
+```
+
+
+# Analysis
+
+The data being used will be log-transformed and scaled as this was used in the pgls analysis for consistency. Also, this is standard since variation in the traits we are examining here is often logarithmic or at least is not made less-normally distributed upon logarithmic transformation.
+
+## Trait-Trait Correlations
+
+### Max. Height
+
+```{r}
+olm.mh.rh <- lm(max_height_m ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.mh.rh)
+#summary(lm(relative_height_by_girth ~max_height_m, data= eucs.scaled.data))
+#summary(max.height.rh) # noticeable decrease in measures of relationship, notable but not dramatic
+
+olm.rh.mh <- lm(relative_height_by_girth ~ max_height_m, data = eucs.scaled.data)
+summary(olm.rh.mh)
+```
+```{r}
+olm.mh.sd <- lm(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.mh.sd)
+#summary(lm(stem_density_g_per_ml ~ max_height_m, data = eucs.scaled.data))
+#summary(max.height.std) # general decrease in all measures of relationship to the end of it no longer being significant
+
+olm.std.mh <- lm(stem_density_g_per_ml ~ max_height_m, data = eucs.scaled.data)
+summary(olm.std.mh)
+```
+
+
+```{r}
+olm.mh.bark <- lm(max_height_m ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.mh.bark)
+#summary(max.height.bark) # general notable desrease in all measure of relationship
+
+olm.bark.mh <- lm(relative_bt_by_girth ~ max_height_m, data = eucs.scaled.data)
+summary(olm.bark.mh)
+```
+
+```{r}
+olm.mh.sla <- lm(max_height_m ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.mh.sla)
+#summary(max.height.sla) # general notable decrease in relationship
+
+olm.sla.mh <- lm(sla_mm2_per_mg ~ max_height_m, data = eucs.scaled.data)
+summary(olm.sla.mh)
+```
+
+```{r}
+olm.mh.lfa <- lm(max_height_m ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.mh.lfa)
+#summary(max.height.lfa) # general decrease in relationship
+
+olm.lfa.mh <- lm(leaf_area_cm2 ~ max_height_m, data = eucs.scaled.data)
+summary(olm.lfa.mh)
+```
+
+```{r}
+olm.mh.lms <- lm(max_height_m ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.mh.lms)
+#summary(max.height.lms) # intro of L ~ 0.8 decreases the strength and certainty of the relationship
+#summary(leaf.mass.mh)
+
+olm.lms.mh <- lm(leaf_mass_g ~ max_height_m, data = eucs.scaled.data)
+summary(olm.lms.mh)
+```
+
+```{r}
+olm.mh.fwl <- lm(max_height_m ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.mh.fwl)
+#summary(max.height.fwl) # L ~ 0.775 destroys most evidence for a measureable relationship
+
+olm.fwl.mh <- lm(fruit_wall_width_mm ~ max_height_m, data = eucs.scaled.data)
+summary(olm.fwl.mh)
+```
+
+```{r}
+olm.mh.fms <- lm(max_height_m ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.mh.fms)
+#summary(max.height.fms) # intro of L ~ 0.8 causes borderline-certain relationship to become incredibly unlikely and the relationship is destroyed
+
+olm.fms.mh <- lm(fruit_mass_mg ~ max_height_m, data = eucs.scaled.data)
+summary(olm.fms.mh)
+```
+
+```{r}
+olm.mh.sms <- lm(max_height_m ~ seed_mass_mg, data = eucs.scaled.data)
+#summary(lm(seed_mass_mg ~ max_height_m, data = eucs.scaled.data))
+#summary(max.height.sms) #becomes unlikely that there's a relationship at all once L ~ 0.8
+
+olm.sms.mh <- lm(seed_mass_mg ~ max_height_m, data = eucs.scaled.data)
+summary(olm.sms.mh)
+```
+
+### Relative Height
+
+```{r}
+olm.rh.std <- lm(relative_height_by_girth ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.rh.std)
+#summary(olm.std.rh)#these two models have very similar slopes though identical r-squared and p-values
+#summary(rel.height.std) #near identical but slightly more certain after L~0.4
+
+olm.std.rh <- lm(stem_density_g_per_ml ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.std.rh)
+#summary(stem.density.rh) #L~0.7 causes slightly more of an increase in certainty but not much
+```
+RH and SD no longer significant relations now in either arrangement.
+
+```{r}
+olm.rh.bark <- lm(relative_height_by_girth ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.rh.bark)
+#summary(rel.height.bark) #almost identical
+
+olm.bark.rh <- lm(relative_bt_by_girth ~ relative_height_by_girth,data = eucs.scaled.data)
+summary(olm.bark.rh)
+#summary(bark.rh) #intro of L~0.7 destroys the relationship entirely
+```
+
+```{r}
+olm.rh.sla <- lm(relative_height_by_girth ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.rh.sla)
+#summary(rel.height.sla) #notable increase in certainty despite L=0
+
+olm.sla.rh <- lm(sla_mm2_per_mg ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.sla.rh)
+#summary(sla.rh) # intro of L~0.8 increased uncertainty but still significant
+```
+
+```{r}
+olm.rh.lfa <- lm(relative_height_by_girth ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.rh.lfa)
+#summary(rel.height.lfa) #near identical
+
+olm.lfa.rh <- lm(leaf_area_cm2 ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.lfa.rh)
+#summary(leaf.area.rh) #intro of L~0.5 notably increased uncertainty but still significant
+```
+
+```{r}
+olm.rh.lms <- lm(relative_height_by_girth ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.rh.lms)
+#summary(rel.height.lms) #very similar
+
+olm.lms.rh <- lm(leaf_mass_g ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.lms.rh)
+#summary(leaf.mass.rh) #still very similar bc L still 0
+```
+
+```{r}
+olm.rh.fwl <- lm(relative_height_by_girth ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.rh.fwl)
+#summary(rel.height.fwl) #slightly more certain but very similar since lambda is still zero (hence we don't this is as relaible as the swapped-axes version of this)
+
+olm.fwl.rh <- lm(fruit_wall_width_mm ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.fwl.rh)
+#summary(fruit.wall.rh)# L ~ 0.6 completely destroys any sense of a relationship and uncertainty almost entire
+```
+
+```{r}
+olm.rh.fms <- lm(relative_height_by_girth ~ fruit_mass_mg, data = eucs.scaled.data) #almost identical to lambda-0 pgls
+summary(olm.rh.fms)
+#summary(rel.height.fms)
+
+olm.fms.rh <- lm(fruit_mass_mg ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.fms.rh)
+#summary(fruit.mass.rh) #slightly less correlated than OLS despite L~0.7
+```
+
+```{r}
+olm.rh.sms <- lm(relative_height_by_girth ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.rh.sms)
+#summary(rel.height.sms) #notably less correlated despite have L=0
+
+olm.sms.rh <- lm(seed_mass_mg ~ relative_height_by_girth, data = eucs.scaled.data)
+summary(olm.sms.rh)
+#summary(seed.mass.rh) #actually increased in certainty! but uncertainty still too great
+```
+
+### Stem Density
+
+```{r}
+olm.std.bark <- lm(stem_density_g_per_ml ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.std.bark)
+#summary(stem.density.bark) # L ~ 0.65 dramatically increases uncertainty, though still significant
+
+olm.bark.std <- lm(relative_bt_by_girth ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.bark.std)
+```
+
+```{r}
+olm.std.sla <- lm(stem_density_g_per_ml ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.std.sla)
+#summary(stem.density.sla) # intro of L ~ 0.4 slightly increases uncertainty but still very much significant
+
+olm.sla.std <- lm(sla_mm2_per_mg ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.sla.std)
+```
+
+```{r}
+olm.std.lfa <- lm(stem_density_g_per_ml ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.std.lfa)
+#summary(stem.density.lfa) #introof L ~ 0.5 increases uncertainty dramatically and relationship is no longer significant
+
+olm.lfa.std <- lm(leaf_area_cm2 ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.lfa.std)
+```
+
+
+```{r}
+olm.std.lms <- lm(stem_density_g_per_ml ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.std.lms)
+#summary(stem.density.lms) #intro of L ~ 0.56 dramatically decreases uncertainty, though still non-significant
+
+olm.lms.std <- lm(leaf_mass_g ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.lms.std)
+```
+
+```{r}
+olm.std.fwl <- lm(stem_density_g_per_ml ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.std.fwl)
+#summary(stem.density.fwl) # L ~ 0.56, yet barely any change beyond slight decrease in uncertainty
+
+olm.fwl.std <- lm(fruit_wall_width_mm ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.fwl.std)
+```
+
+```{r}
+olm.std.fms <- lm(stem_density_g_per_ml ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.std.fms)
+#summary(stem.density.fms) #slight decrease in uncertainty from L ~ 0.56
+
+olm.fms.std <- lm(fruit_mass_mg ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.fms.std)
+```
+
+```{r}
+olm.std.sms <- lm(stem_density_g_per_ml ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.std.sms)
+#summary(stem.density.sms) # very similar though the direction of the relationship did change a bit, however the relationship is very non significant that that doesn't matter much
+
+olm.sms.std <- lm(seed_mass_mg ~ stem_density_g_per_ml, data = eucs.scaled.data)
+summary(olm.sms.std)
+```
+
+
+
+### Relative Bark Thickness
+
+```{r}
+olm.bark.sla <- lm(relative_bt_by_girth ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.bark.sla)
+#summary(bark.sla)# intro of L ~ 0.7 increases uncertainty a lot but still significant
+
+olm.sla.bark <- lm(sla_mm2_per_mg ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.sla.bark)
+```
+
+```{r}
+olm.bark.lfa <- lm(relative_bt_by_girth ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.bark.lfa)
+#summary(bark.lfa) #L ~ 0.6 increased uncertainty but still significant
+
+olm.lfa.bark <- lm(leaf_area_cm2 ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.lfa.bark)
+```
+
+```{r}
+olm.bark.lms <- lm(relative_bt_by_girth ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.bark.lms)
+#summary(bark.lms) #L ~ 0.7 destroys relationship and is no longer signifcant at all
+
+olm.lms.bark <- lm(leaf_mass_g ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.lms.bark)
+```
+
+
+```{r}
+olm.bark.fwl <- lm(relative_bt_by_girth ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.bark.fwl)
+#summary(bark.fwl) # introof L ~ 0.7 increases uncertainty of relationship but still manages to be significant
+
+olm.fwl.bark <- lm(fruit_wall_width_mm ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.fwl.bark)
+```
+
+
+```{r}
+olm.bark.fms <- lm(relative_bt_by_girth ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.bark.fms)
+#summary(bark.fms) # L ~ 0.68 somewhat increases uncertainty but otherwise very little change
+
+olm.fms.bark <- lm(fruit_mass_mg ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.fms.bark)
+```
+
+
+```{r}
+olm.bark.sms <- lm(relative_bt_by_girth ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.bark.sms)
+#summary(bark.sms) # somewhat increases uncertainty and becomes non-significant since it was only ever pretty borderline anyway
+
+olm.sms.bark <- lm(seed_mass_mg ~ relative_bt_by_girth, data = eucs.scaled.data)
+summary(olm.sms.bark)
+```
+
+
+### SLA
+
+```{r}
+olm.sla.lfa <- lm(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.sla.lfa)
+#summary(sla.lfa) # L ~ 0.8 completely destroys the relationship
+
+olm.lfa.sla <- lm(leaf_area_cm2 ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.lfa.sla)
+```
+
+
+```{r}
+olm.sla.lms <- lm(sla_mm2_per_mg ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.sla.lms)
+#summary(sla.lms) # L ~ 0.8 DECREASED the uncertainty to be very significant
+
+olm.lms.sla <- lm(leaf_mass_g ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.lms.sla)
+```
+
+
+```{r}
+olm.sla.fwl <- lm(sla_mm2_per_mg ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.sla.fwl)
+#summary(sla.fwl) #slight increase in uncertainty after L ~ 0.65 incorporated
+
+olm.fwl.sla <- lm(fruit_wall_width_mm ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.fwl.sla)
+```
+
+```{r}
+olm.sla.fms <- lm(sla_mm2_per_mg ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.sla.fms)
+#summary(sla.fms) #L ~ 0.7 slughtly DECREASES uncertainty and increases effect size
+
+olm.fms.sla <- lm(fruit_mass_mg ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.fms.sla)
+```
+
+```{r}
+olm.sla.sms <- lm(sla_mm2_per_mg ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.sla.sms)
+#summary(sla.sms) # L ~ 0.76 somwhat DECREASED uncertainty and increasedeffect size
+
+olm.sms.sla <- lm(seed_mass_mg ~ sla_mm2_per_mg, data = eucs.scaled.data)
+summary(olm.sms.sla)
+```
+
+### Leaf Area
+
+```{r}
+olm.lfa.lms <- lm(leaf_area_cm2 ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.lfa.lms)
+#summary(leaf.area.lms) #intro of L ~ 0.8 does not change uncertainty but slightly decreases effect size, though slightly increases R-squared
+#FIRST TIME decrease in effect size has not been accompanied by decrease in r-squared
+
+olm.lms.lfa <- lm(leaf_mass_g ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.lms.lfa)
+```
+
+```{r}
+olm.lfa.fwl <- lm(leaf_area_cm2 ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.lfa.fwl)
+#summary(leaf.area.fwl) #intro of L ~ 0.7 dramatically increases effect size and decreases uncertainty, causing the relationship to become significant
+
+olm.fwl.lfa <- lm(fruit_wall_width_mm ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.fwl.lfa)
+```
+
+```{r}
+olm.lfa.fms <- lm(leaf_area_cm2 ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.lfa.fms)
+#summary(leaf.area.fms) # L ~ 0.66 causes DECREASE in uncertainty as well as increase in effect size and proportion of accounted-for variation
+
+olm.fms.lfa <- lm(fruit_mass_mg ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.fms.lfa)
+```
+
+```{r}
+olm.lfa.sms <- lm(leaf_area_cm2 ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.lfa.sms)
+#summary(leaf.area.sms) # L ~ 0.65 increases effect size and r-squred and dramatically decreasing the uncertainty along, causing the relationship to become significantly observable
+
+olm.sms.lfa <- lm(seed_mass_mg ~ leaf_area_cm2, data = eucs.scaled.data)
+summary(olm.sms.lfa)
+```
+
+
+### Leaf Mass
+
+```{r}
+olm.lms.fwl <- lm(leaf_mass_g ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.lms.fwl)
+#summary(leaf.mass.fwl) # intro of L ~ 0.6 sees increase in strength of relationship, effect size and decrease in uncertainty, though it was already significant anyway
+
+olm.fwl.lms <- lm(fruit_wall_width_mm ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.fwl.lms)
+```
+
+```{r}
+olm.lms.fms <- lm(leaf_mass_g ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.lms.fms)
+#summary(leaf.mass.fms) #L ~ 0.6 significantly increases the strength of the relationship
+
+olm.fms.lms <- lm(fruit_mass_mg ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.fms.lms)
+```
+
+
+```{r}
+olm.lms.sms <- lm(leaf_mass_g ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.lms.sms)
+#summary(leaf.mass.sms) # L~ 0.6 significantly increases the strength of the relationship and decreases the uncertainty
+
+olm.sms.lms <- lm(seed_mass_mg ~ leaf_mass_g, data = eucs.scaled.data)
+summary(olm.sms.lms)
+```
+
+
+### Fruit Wall Width
+
+```{r}
+olm.fwl.fms <- lm(fruit_wall_width_mm ~ fruit_mass_mg, data = eucs.scaled.data)
+summary(olm.fwl.fms)
+#summary(fruit.wall.fms) # L ~ 0.6 though the results are very much similar
+
+olm.fms.fwl <- lm(fruit_mass_mg ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.fms.fwl)
+```
+
+```{r}
+olm.fwl.sms <- lm(fruit_wall_width_mm ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.fwl.sms)
+#summary(fruit.wall.sms) # the effect size increases but nothing else really changes
+
+olm.sms.fwl <- lm(seed_mass_mg ~ fruit_wall_width_mm, data = eucs.scaled.data)
+summary(olm.sms.fwl)
+```
+
+
+### Fruit Mass
+
+```{r}
+olm.fms.sms <- lm(fruit_mass_mg ~ seed_mass_mg, data = eucs.scaled.data)
+summary(olm.fms.sms)
+#summary(fruit.mass.sms) # L ~ 0.5 increases effect size but decreases r-squared
+
+olm.sms.fms <- lm(seed_mass_mg ~ fruit_mass_mg,data = eucs.scaled.data)
+summary(olm.sms.fms)
+```
+
+
+
+
+
+So when does accounting for phylogeny decrease the effect size/certainty/proportion of variation accounted for?
+  - Mh-stem and leaf traits decrease notably
+      - mh-sd no longer significant
+      - Mh-fww goes from significant to non-significant, though the actual change in measures of the strength of the relationship aren't that great
+      -mh-lms becomes non-significant now
+  - Mh-fm and sm, go from almost certain correlations to almost definitely not
+  - all but sms and sd -w rh
+  - all but lms, fww and fms with stem density
+    -sd-lfa no longer significant
+  - all bark correlations
+    -bark-lms no longer significant
+  - all sla- except lms and rep.traits
+      -sla-lfa no longer significant
+
+Those where accounting for phylogeny increased relationship strength:
+  -sms-rh
+  -sd-rh
+  -sd-lms
+  -sd-fms
+  -sd-fww
+  -sla-lms
+  -sla-reproductive traits
+  -lfa-reproductive traits
+      -lfa-seed is now significant
+      -lfa fruit wall now significant
+  -lms-reproductive traits
+  
+
+Weird effects:
+  -leaf area-lms increases in effect size but decreases in r-squared
+  -fruit wall width-fruit mass slightly increases but remains almost identical
+  -fww-sms increased effect size only
+  -fms-sms inreased effect size but decreased r-squred
+  
+  
+In general, OLS regression overestimates strength of relationships among habit and stem traits and underestimates them among the reproductive traits. Mostly th effects were not great enough to change significance but there were a few cases where this changed:
+  -max.height-sd no longer clearly significant
+  -max.height-fruit wall width (fms and sms also no longer borderline)
+  -max.height-leaf mass also no longer significant (using upper lambda model)
+  -rbt-rh also now not significant (when using the upper lambda otherwise its ambiguous)
+  -rbt-lms no longer significant (when using upper lambda)
+  -stem.density-leaf area no longer significant
+  -sla-lfa no longer significant
+  
+  -leaf area-seed mass now significant
+  -leaf area-fruit wall width now significant
+  
+This is all for the orientation of the axes that were calculated for the original olms but just need to check any changes in significance that may be different depending on which way around the pgls was since that does occasionally change the significance.
+
+lms-mh
+rbt-rh (in the upper lambda)
+sd-mh (already accounted for above as the way arounf corresponding to upper half lambda)
+lms-bark
+
+Hence rbt-rh is another relationship not previously acconted for and included within the upper lambda half we're going with that resulted in a change in significance, the rest already calculated above will be the same in both directions or will have chosen the upper lambda half arrangement of varibales anyway.
+
+### Lignouber-Only vs. Everything Else
+
+```{r}
+olm.mh.LO <- lm(max_height_m ~ LO2, data = eucs.scaled.data)
+summary(olm.mh.LO)
+```
+
+```{r}
+olm.rh.LO <- lm(relative_height_by_girth ~ LO2, data = eucs.scaled.data)
+summary(olm.rh.LO)
+```
+
+```{r}
+olm.sd.LO <- lm(stem_density_g_per_ml ~ LO2, data = eucs.scaled.data)
+summary(olm.sd.LO)
+```
+
+```{r}
+olm.rbt.LO <- lm(relative_bt_by_girth ~ LO2, data = eucs.scaled.data)
+summary(olm.rbt.LO)
+```
+
+```{r}
+olm.sla.LO <- lm(sla_mm2_per_mg ~ LO2, data = eucs.scaled.data)
+summary(olm.sla.LO)
+```
+
+```{r}
+olm.la.LO <- lm(leaf_area_cm2 ~ LO2, data = eucs.scaled.data)
+summary(olm.la.LO)
+```
+
+```{r}
+olm.lm.LO <- lm(leaf_mass_g ~ LO2, data = eucs.scaled.data)
+summary(olm.lm.LO)
+```
+
+```{r}
+olm.fww.LO <- lm(fruit_wall_width_mm ~ LO2, data = eucs.scaled.data)
+summary(olm.fww.LO)
+```
+
+```{r}
+olm.fm.LO <- lm(fruit_mass_mg ~ LO2, data = eucs.scaled.data)
+summary(olm.fm.LO)
+```
+
+```{r}
+olm.sm.LO <- lm(seed_mass_mg ~ LO2, data = eucs.scaled.data)
+summary(olm.sm.LO)
+```
+
+
+# Plots and Comparisons
+
+## Ellipse-Table (For supp.mat.)
+
+```{r}
+# pre-calculating the (Pearson's r) correlation coefficients is better as the resulting matrix already has the correct row and col names as an input to other functions and we don't have to assign variable names later
+table.matrix <- cor(na.omit(eucs.scaled.data[,!names(eucs.scaled.data) %in% c("taxon", "dataset", "dataset2", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sprouting_Type3", "Sprouting_Type4", "Sieberi")]))
+table.matrix
+
+colnames(table.matrix) <- c("MH", "RH", "SD", "RBT", "SLA", "LA", "LM", "FWW", "FM", "SM", "BOS")
+rownames(table.matrix) <- colnames(table.matrix)
+corrplot(table.matrix, method = "ellipse")
+#corrplot(matrix.r, method = 'ellipse')
+
+pdf("../Output_figures/basic_corrplot.pdf", height = 5, width = 7)
+corrplot(table.matrix, method = "ellipse", tl.col = "black", tl.cex = 1.5, cl.cex = 1.5)
+mtext("Correlation coefficient (Pearson's r)", side = 4, line = -0.5, cex = 1.5)
+dev.off()
+```
+My function to try and square the terms while keeping the sign has resulted in some strange sign changes so need to be fixed. The original table just using the correlation coefficients
+
+You can square all the entries in a matrix by squaring the matrix object, since actual matrix operation such that would cause a squared matrix to be multiplied by itself are written differently to standard scalar opertaions that work on each entry separately.
+
+It's possible to generate a correlation matrix from pgls models by extracting the (pseudo-)r-squared values from the pgls models (hopefully I can find a for loop or function for that so I dont have to do it manually) and then taking the square root (and making sure to re-negative the negative correlations) to arrive at the correlation coefficient r.
+
+
+## Network Diagram
+
+
+```{r}
+qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+
+
+Now to compare with the corresponding diagram using the pgls model data.
+
+```{r}
+qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+
+#### Matrix of Models
+
+Here we create a dataframe of the models so that we can input this into extration-function for the r2, slope, SE and P-values later. Be aware the way it is constructed means it need to be transposed in order to represent the independent and dependent variables on the correct axes, currently it has dependent variable as colnames rather than row names.
+
+Before this can be done, however, we will need a model to represent the 'perfect fit' to be input at the diagonals. We can do this by effectively regressing a variable with itself diguised as a different variable (so the code allows the comparison).
+
+```{r}
+#to regress a variable with itself, it needs to be regressed against another variable with a different name but the same datapoints, since the regression functions don't allow the regression of variables with the same name
+eucs.scaled.data.doubled <- cbind(eucs.scaled.data, eucs.scaled.data[c("max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_mass_mg", "fruit_wall_width_mm", "seed_mass_mg")])
+
+#now to rename the columns
+names(eucs.scaled.data.doubled) <- c("taxon", "location", "second_location", "max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_mass_mg", "fruit_wall_width_mm", "seed_mass_mg", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sprouting_Type3", "Sprouting_Type4","LO2", "Sieberi", "max_height_m2", "relative_height_by_girth2", "stem_density_g_per_ml2", "relative_bt_by_girth2", "sla_mm2_per_mg2", "leaf_area_cm22", "leaf_mass_g2", "fruit_mass_mg2", "fruit_wall_width_mm2", "seed_mass_mg2")  
+
+#now need to run models of variables against themselves so that r-squared (and slope coefficient) can be 1 and can be placed in the list wherever required
+perfect.fit <- lm(max_height_m ~ max_height_m2, data = eucs.scaled.data.doubled)
+# names(perfect.fit$coefficients)[[2]] <- "max_height_m2" #to fix a new problem making the extract_P fucntion not work on this particular model becasue for some reason the variable had 'Y' at the end of its name in the coefficients dataframe from which the P-value is lifted
+summary(perfect.fit)
+```
+
+```{r}
+olm.mh.list <- list(perfect.fit, olm.mh.rh, olm.mh.sd, olm.mh.bark, olm.mh.sla, olm.mh.lfa, olm.mh.lms, olm.mh.fwl, olm.mh.fms, olm.mh.sms, olm.mh.LO)
+
+olm.rh.list <- list(olm.rh.mh, perfect.fit, olm.rh.std, olm.rh.bark, olm.rh.sla, olm.rh.lfa, olm.rh.lms, olm.rh.fwl, olm.rh.fms, olm.rh.sms, olm.rh.LO)
+
+olm.std.list <- list(olm.std.mh, olm.std.rh, perfect.fit, olm.std.bark, olm.std.sla, olm.std.lfa, olm.std.lms, olm.std.fwl, olm.std.fms, olm.std.sms, olm.sd.LO)
+  
+olm.bark.list <- list(olm.bark.mh, olm.bark.rh, olm.bark.std, perfect.fit, olm.bark.sla, olm.bark.lfa, olm.bark.lms, olm.bark.fwl, olm.bark.fms, olm.bark.sms, olm.rbt.LO)
+
+olm.sla.list <- list(olm.sla.mh, olm.sla.rh, olm.sla.std, olm.sla.bark, perfect.fit, olm.sla.lfa, olm.sla.lms, olm.sla.fwl, olm.sla.fms, olm.sla.sms, olm.sla.LO)
+
+olm.lfa.list <- list(olm.lfa.mh, olm.lfa.rh, olm.lfa.std, olm.lfa.bark, olm.lfa.sla, perfect.fit, olm.lfa.lms, olm.lfa.fwl, olm.lfa.fms, olm.lfa.sms, olm.la.LO)
+
+olm.lms.list <- list(olm.lms.mh, olm.lms.rh, olm.lms.std, olm.lms.bark, olm.lms.sla, olm.lms.lfa, perfect.fit, olm.lms.fwl, olm.lms.fms, olm.lms.sms, olm.lm.LO)
+
+olm.fwl.list <- list(olm.fwl.mh, olm.fwl.rh, olm.fwl.std, olm.fwl.bark, olm.fwl.sla, olm.fwl.lfa, olm.fwl.lms, perfect.fit, olm.fwl.fms, olm.fwl.sms, olm.fww.LO)
+
+olm.fms.list <- list(olm.fms.mh, olm.fms.rh, olm.fms.std, olm.fms.bark, olm.fms.sla, olm.fms.lfa, olm.fms.lms, olm.fms.fwl, perfect.fit, olm.fms.sms, olm.fm.LO)
+
+olm.sms.list <- list(olm.sms.mh, olm.sms.rh, olm.sms.std, olm.sms.bark, olm.sms.sla, olm.sms.lfa, olm.sms.lms, olm.sms.fwl, olm.sms.fms, perfect.fit, olm.sm.LO)
+
+olm.LO.list <- list(olm.mh.LO, olm.rh.LO, olm.sd.LO, olm.rbt.LO, olm.sla.LO, olm.la.LO, olm.lm.LO, olm.fww.LO, olm.fm.LO, olm.sm.LO, perfect.fit)
+
+olm.traits.list <- list(olm.mh.list, olm.rh.list, olm.std.list, olm.bark.list, olm.sla.list, olm.lfa.list, olm.lms.list, olm.fwl.list, olm.fms.list, olm.sms.list, olm.LO.list) #remember this still has the column and titles corresponding to dep_var
+```
+
+
+### Significant lines only
+
+Since the olm r-values are already equal for the upper and lower triangles of the matrix and as such it is already symmetrical and only one value exists for each pairwise comparison, we can skip the part on the pgls netowrk diagrams that makes a symmetrical version of the netowrk diagram. 
+
+However, in order to make this diagram similarly easier to read with fewer lines and comparable to the sig-only pgls network, we need to shoe only those lines that correpsond to significant correlations.
+
+```{r}
+#to extact the p-vales from each model systematically
+olm.P <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, extract_P))
+})
+
+olm.P <- as.data.frame(olm.P)
+colnames(olm.P) <- colnames(table.matrix)
+row.names(olm.P) <- colnames(olm.P)
+olm.P <- t(olm.P) #now it's around the right way with the row indicating the dependent variable and column the independent variable
+olm.P == t(olm.P) #meant to be symmetrical since the r2 and P don't change when indep and dep variables get swapped, but if using the regression parameters instead of simply the Pearson's correlation coefficient
+all.equal(olm.P, t(olm.P)) #TRUE so the differences are only computational
+
+#need to figure out if the pattern of significance has changed or not
+sig.models.olm <- olm.P < 0.05
+
+sig.only.r.olm <- table.matrix
+sig.only.r.olm[!sig.models.olm] <- 0
+```
+
+
+Now the network diagram with only significant lines:
+
+
+Compared with the full version of the olm network containing all associations:
+
+```{r}
+qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+
+
+Compared with the pgls sig-only network:
+
+```{r}
+qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+
+
+Now to save/export the figures:
+
+```{r}
+network.olm.sig <- qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(network.olm.sig, filetype = 'pdf', filename = "../Output_figures/olm_network_sig_only", height = 15, width = 20, labels = colnames(sig.only.r.olm), label.cex = 2)
+```
+
+
+
+
+#### Sqrt of r-squared of regression summary
+
+Now I want to check to see if the OLS network diagram is any different if we use the square root of the coefficient of determination from the linear models instead of simply the cor function.
+
+```{r}
+olm.reg.r2 <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, r_squared))
+})
+
+olm.reg.r2 <- as.data.frame(olm.reg.r2)
+colnames(olm.reg.r2) <- colnames(table.matrix)
+row.names(olm.reg.r2) <- colnames(olm.reg.r2)
+olm.reg.r2 <- t(olm.reg.r2) #now the right way around
+diag(olm.reg.r2) <- 0 #better for network diagram , though having 1 in the diagonals is better for ellipse table
+
+# Now to check if the slight differences in r2 for reciprocal models are significantly different or just computationally different
+all.equal(as.data.frame(olm.reg.r2),as.data.frame(t(olm.reg.r2)))
+
+olm.coeff <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, extract_slope))
+})
+
+olm.coeff <- as.data.frame(olm.coeff)
+colnames(olm.coeff) <- colnames(table.matrix)
+row.names(olm.coeff) <- colnames(olm.coeff)
+olm.coeff <- t(olm.coeff) #now the right way around
+olm.coeff.abs <- abs(olm.coeff) #remember this is not a symmetrical matrix, even though r and p values are
+
+olm.neg.slopes <- olm.coeff < 0
+olm.reg.r <- sqrt(olm.reg.r2)
+olm.reg.r[olm.neg.slopes] <- -1*olm.reg.r[olm.neg.slopes] #keep in mind this is already a symmetrical matrix as r2 values don't depend on axis arrangement
+
+#olm.coeff.half < 0 == olm.coeff < 0 #manual check of what this line is meant to give you (if each logical matrix was its own object allowing the code to work i presume) gives them being equal hence slightly different coefficients never change sign so we don't have to worry about this for plotting purposes
+
+# 6/45 relationships have difference in r values calculated via the two methods between magnitude 0.05 and 0.102
+sort(abs(table.matrix-olm.reg.r)) 
+all.equal(table.matrix, olm.reg.r)
+
+#now to set all r-values for non-significant relationships to 0
+olm.reg.r.sig.only <- olm.reg.r
+olm.reg.r.sig.only[!sig.models.olm] <- 0
+
+qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+# now to export this version of the figure to look at it
+network.full.olm <- qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(network.full.olm, filetype = 'pdf', filename = "../Output_figures/olm_network_full", height = 15, width = 20, labels = colnames(sig.only.r.olm), label.cex = 2)
+```
+
+Only the slightest differences can be seen in the networks resulting from r-cor vs r-sqrt(reg-r) so it should significantly change any results but the latter is more comparable to how the pgls network was constructed so that's what we'll be using.
+
+To actually quantify the differences in magnitude of r calculated these two different ways:
+
+```{r}
+# for only significant-only first
+olm.reg.r.sig.only - sig.only.r.olm
+sort(abs(olm.reg.r.sig.only - sig.only.r.olm))
+
+mean(abs(olm.reg.r.sig.only - sig.only.r.olm)[!abs(olm.reg.r.sig.only - sig.only.r.olm) %in% c(0,1)])
+median(abs(olm.reg.r.sig.only - sig.only.r.olm)[!abs(olm.reg.r.sig.only - sig.only.r.olm) %in% c(0,1)])
+
+# for full matrix
+sort(abs(table.matrix-olm.reg.r)) 
+mean(abs(table.matrix-olm.reg.r)[!abs(table.matrix-olm.reg.r) == 1])
+median(abs(table.matrix-olm.reg.r)[!abs(table.matrix-olm.reg.r) == 1])
+
+# Foe what we'll actually show on the final network
+table.matrix2 <- table.matrix
+table.matrix2[abs(table.matrix2) < 0.3] <- 0
+
+olm.reg.r.2 <- olm.reg.r
+olm.reg.r.2[abs(olm.reg.r.2) < 0.3] <- 0
+
+sort(abs(table.matrix2-olm.reg.r.2)) 
+mean(abs(table.matrix2-olm.reg.r.2)[!abs(table.matrix2-olm.reg.r.2)%in% c(1, 0) & abs(table.matrix2-olm.reg.r.2) < 0.3])
+median(abs(table.matrix2-olm.reg.r.2)[!abs(table.matrix2-olm.reg.r.2) %in% c(1, 0) & abs(table.matrix2-olm.reg.r.2) < 0.3])
+```
+
+For significant-only relationships data:
+The largest difference in magnitude was 0.125 in and was between FM-LA, but the next one was 0.087 (FM-LM) and then 0.066 (RBT-LA) and the rest were less. The mean and median differences were 0.03271 and 0.03139 respectively.
+
+For the full unabridged data: 
+The largest difference in magnitude was 0.125 in and was between FM-LA, but the next one was 0.097 (FM-BOS)  and then 0.087 (FM-LM) and then 0.072 (SLA-LM) and the rest were less. The mean and median differences were 0.03679 and 0.03342 respectively.
+
+For the r > 0.3 data:
+The largest difference in magnitude was 0.087 (FM-LM) and the next one was 0.066 (RBT-LA) and then 0.063 (SLA-FM) and the rest were less. The mean and median differences were 0.03028 and 0.02921 respectively.
+
+### Only r > 0.2
+
+Now if we plotted only the relationships that had larger r-values than 0.2 (i.e. 4% of the variation accounted for)
+
+```{r}
+#going to try the network to see how much it gets altered if we change the definition of 'significant' to p< 0.05 AND r > 0.2
+
+olm.reg.r.sig.only2 <- olm.reg.r.sig.only
+olm.reg.r.sig.only2[abs(olm.reg.r.sig.only2) < 0.2] <- 0
+olm.reg.r.sig.only2 == olm.reg.r.sig.only # RBT-LM, RBT-SM, LA-FM, and LM-SM
+
+qgraph(olm.reg.r.sig.only2, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(olm.reg.r.sig.only2, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+#qgraph(sig.only.r.half2, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+
+#### Only r > 0.3
+
+```{r}
+# max(abs(olm.reg.r.sig.only2)) 
+# max(abs(sig.only.r.half2))
+# abs(olm.reg.r.sig.only2) > 0.9 #only FM-FWW are above 90 and, since it would not also get rid of other relstionships that we onsider to be trivial, hence we will not impose this upper limit
+# abs(sig.only.r.half2) > 0.9 # only FM-FWW again would be excluded by this
+# abs(olm.reg.r.sig.only2) < 0.3 #many correlations disappear
+# 
+# abs(olm.reg.r.sig.only2) > 0.8 # this excludes both FM-FWW and LA-LM
+# abs(sig.only.r.half2) > 0.8 # same with the pgls 
+# 
+# # now lets try 0.2 < r < 0.9
+# olm.reg.r.sig.only3 <- olm.reg.r.sig.only2
+# olm.reg.r.sig.only3[abs(olm.reg.r.sig.only3) < 0.2 | abs(olm.reg.r.sig.only3) > 0.9] <- 0 # additionally removes FM-FWW
+# qgraph(olm.reg.r.sig.only3, layout = 'spring', label.cex = 0.9, label.scale = FALSE) # network behaves surprisingly similar to original
+# sig.only.r.half3 <- sig.only.r.half2
+# sig.only.r.half3[abs(sig.only.r.half3) < 0.2 | abs(sig.only.r.half3) > 0.9] <- 0
+# qgraph(olm.reg.r.sig.only3, layout = 'spring', label.cex = 0.9, label.scale = FALSE) 
+# qgraph(sig.only.r.half3, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+# 
+# # now lets try r > 0.3
+# olm.reg.r.sig.only4 <- olm.reg.r.sig.only2
+# olm.reg.r.sig.only4[abs(olm.reg.r.sig.only4) < 0.3 & abs(olm.reg.r.sig.only4) > 0] <- 0 #removes SLA-SM, RH-LM, MH-LM, MH-FWW, and RBT-RH along with FM-FWW
+# qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE) 
+# sig.only.r.half4 <- sig.only.r.half2
+# sig.only.r.half4[abs(sig.only.r.half4) < 0.3 & abs(sig.only.r.half4) > 0] <- 0 #removes RBT-FWW, RBT-FM, RBT-LA, SD-RB, RH-(SLA, LA, LM)
+# qgraph(sig.only.r.half4, layout = 'spring', label.cex = 0.9, label.scale = FALSE) 
+# qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE) 
+# 
+# 
+# # now lets try 0.3 > r > 0.8
+# olm.reg.r.sig.only5 <- olm.reg.r.sig.only4
+# olm.reg.r.sig.only5[abs(olm.reg.r.sig.only5) > 0.8] < 0 #additionally removes LA-LM
+# qgraph(olm.reg.r.sig.only5, layout = 'spring', label.cex = 0.9, label.scale = FALSE) # not very informative as it makes it harder to see the distinctness of groups
+# 
+# sort(olm.reg.r.sig.only2)
+# 
+# olm.reg.r.sig.only4^2
+# 
+# median(abs(olm.reg.r.sig.only4[abs(olm.reg.r.sig.only4) > 0]))
+# mean(abs(olm.reg.r.sig.only4[abs(olm.reg.r.sig.only4) > 0]))
+# 
+# #using more colorblind-friendly colors:
+# qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+# qgraph(sig.only.r.half4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind') 
+# 
+# max(abs(sig.only.r.half4[sig.only.r.half4 > 0]))
+# 
+# network.diag.olm.0.3.col <- qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, threshold = 0.3, theme = 'colorblind')
+# 
+# qgraph(network.diag.olm.0.3.col, filetype = 'pdf', filename = "Output_figures/olm_network_R>0.3_colorblind", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+```
+When we apply progressively more stringent requirement on relationship strength in order for it to contribute to the network, SLA emerges as the most central trait as many of the relationships between MH and others and RBT and others were relatively weak (r-squared/pseudo-r-squared < 0.9) and the peripheral nature of RH and SD is highlighted. However, general relationships were found to be consistent
+
+
+
+
+### Different arguments
+```{r}
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'classic')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'gray')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'Hollywood')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'Borkulo')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'gimme')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'TeamFortress')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'Reddit')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'Leuven')
+qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'Fried')
+
+
+# #using more colorblind-friendly colors:
+# qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+# qgraph(sig.only.r.half4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind') 
+# 
+# pdf("colorblind_pgls_network_0.3.pdf")
+# qgraph(sig.only.r.half4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind') 
+# dev.off()
+
+# pdf("colorblind_OLS_network_0.3.pdf")
+# qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind') 
+# dev.off()
+```
+
+
+### Using minimum values instead
+
+```{r}
+# this shows the effect of setting a 'minimum' value
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.3)
+#qgraph(olm.reg.r.sig.only4, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+
+# the following shows that increasing overall edge width just scales them to a new maximum
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.3, posCol = list('blue', 'blue'), negCol = list('red', 'red'), edge.width = 1.5)
+
+# comparison between using minimum argument versus threshold argument
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', threshold = 0.3)
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.3)
+
+# just a check for what the general topology of a |r| > 0.30 threshold would look like
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.2)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.2)
+```
+
+Minimum may not be the best way to go either because it also resets the '0' thickness to be attached to our threshold value as well as excluding everything below it so it makes those slighty-higher-than-threshold values almost invisible on the graph. Turns out using the 'threshold' argument pretty much does the same thing as setting correlations with strength below that absolute value to zero and excluding them from the network. However, that is also an issue as setting relationships to zero changes the relative positions of the nodes effectively ignoring any relationship that can't be seen as if it weren't there.
+
+
+### Manual removal of edges
+
+```{r}
+# First to remind ourselves what relationships should be in the final network
+## note cannot regerate the effective version of the r-matrix used if the subsetting was done as part of function arguments 'threshold' or 'minimum' rather than pre-making the altered r-matrix accordingly
+qgraph(olm.reg.r, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', threshold = 0.30)
+matrix.r3.olm <- olm.reg.r
+matrix.r3.olm[abs(matrix.r3.olm) < 0.3] <- 0
+
+# now to use above info as visual guide for which nodes should have lines between them
+## note that nodes are numbered in order they appear as columns in the r-matrix
+network.edge.rem.olm <- qgraph(olm.reg.r, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.edge.rem.olm$Edgelist$weight[abs(network.edge.rem.olm$Edgelist$weight) <0.3] <- 0
+plot(network.edge.rem)
+plot(network.edge.rem.olm)
+qgraph(olm.reg.r, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+
+# # now to check if the result is different when we start with the significant-only network before getting rid of the lines
+#   #WARNING need different edges-to-remove list
+# sig.only.pgls.network.rm <- qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, theme = 'colorblind')
+# as.data.frame(sig.only.pgls.network.rm$Edgelist)
+# edges.to.remove2 <- c(3, 5, 9, 10, 11, 12, 15, 17, 19, 25)
+# sig.only.pgls.network.rm$Edgelist$weight[edges.to.remove2] <-0
+# plot(sig.only.pgls.network.rm)
+# 
+# sig.only.ols.network.rm <- qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex =0.9, theme = 'colorblind')
+# 
+# as.data.frame(sig.only.ols.network.rm$Edgelist)
+# edges.to.remove.ols.2 <- c(4, 15, 16, 17, 19, 25, 28, 29, 30)
+# sig.only.ols.network.rm$Edgelist$weight[edges.to.remove.ols.2] <- 0
+# plot(sig.only.ols.network.rm)
+```
+
+
+#### Changing node colours
+
+```{r}
+# note this object we're about to alter is a character vector not a list
+class(network.edge.rem$graphAttributes$Nodes$color)
+
+network.edge.rem$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.edge.rem$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.edge.rem$graphAttributes$Nodes$label.cex <- 1.3
+plot(network.edge.rem)
+plot(network.edge.rem.olm)
+network.edge.rem.olm$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.edge.rem.olm$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.edge.rem.olm$graphAttributes$Nodes$label.cex <- 1.3
+
+
+
+# network.edge.rem$graphAttributes$Nodes$color <- c("#A80000FF", "#A80000FF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF", "#FFFFFFFF")
+# plot(network.edge.rem)
+# plot(network.edge.rem.olm)
+# network.edge.rem.olm$graphAttributes$Nodes$color <- c("#A80000FF", "#A80000FF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF", "#FFFFFFFF")
+
+```
+
+
+
+#### Side-by-side networks
+
+
+```{r}
+#to plot both networks side by side
+pdf("../Output_figures/networks_combined_r3_colorblind.pdf", width = 8, height = 12)
+par(mfrow = c(2,1))
+plot(network.edge.rem.olm)
+plot(network.edge.rem)
+dev.off()
+#multiplot(network.edge.removal.test, network.edge.removal.test.ols)
+
+#trying to see if the line thickness of both network can be standardised so I can put a single legend on there without the thickness scaling to each respective maximum 
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', maximum = 1)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', maximum = 1)
+# turns out that setting the maximum = 1 argument only makes the lines slightly thinner as the max would have been ~0.9 before anyway so it isnt much of a change
+
+# checking what the min and max value of r are in each network to see if they're basically on the same scale anyway and it appears the mins and max's are similar enough that the line thickness on the two networks could be on the same scale. Here, 0.332 and 0.301 are minima and 0.907 and 0.904 are maxima respectively.
+min(abs(olm.reg.r[olm.reg.r > 0.3]))
+min(abs(matrix.r.half[matrix.r.half > 0.3]))
+
+max(abs(olm.reg.r[olm.reg.r > 0.3]))
+max(abs(matrix.r.half[matrix.r.half > 0.3 & matrix.r.half < 1]))
+
+```
+##### Variations of Networks
+
+```{r}
+# plot(network.edge.rem)
+# # Var 1 just setting the dark red to white
+# var1 <- network.edge.rem
+# var1$graphAttributes$Nodes$color <- c("#FFFFFFFF", "#FFFFFFFF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF")
+# var1$graphAttributes$Nodes$label.cex <- 1.3 # 2
+# plot(var1)
+# var1.olm <- network.edge.rem.olm
+# var1.olm$graphAttributes$Nodes$color <- c("#FFFFFFFF", "#FFFFFFFF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF")
+# var1.olm$graphAttributes$Nodes$label.cex <- 1.3 # 0.9
+# 
+# pdf("../Output_figures/Network_versions/variation_1.pdf", width = 8, height = 10)
+# par(mfrow = c(2,1))
+# plot(var1.olm)
+# plot(var1)
+# dev.off()
+# 
+# # variation 2: outlines only
+# 
+# var2 <- var1
+# var2$graphAttributes$Nodes$color <- c("#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF")
+# var2$graphAttributes$Nodes$border.color <- c("#A80000FF", "#A80000FF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF")
+# var2$graphAttributes$Nodes$border.width <- c(3,3,3,3,3,3,3,3,3,3)
+# plot(var2)
+# 
+# var2.olm <- var1.olm
+# var2.olm$graphAttributes$Nodes$color <- c("#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF", "#FFFFFFFF")
+# var2.olm$graphAttributes$Nodes$border.color <- c("#A80000FF", "#A80000FF", "#F5C86977", "#F5C86977", "#99E472FF", "#99E472FF", "#99E472FF", "#B66DFFFF", "#B66DFFFF", "#B66DFFFF")
+# var2.olm$graphAttributes$Nodes$border.width <- c(3,3,3,3,3,3,3,3,3,3)
+# plot(var2.olm)
+# 
+# pdf("../Output_figures/Network_versions/variation_2.pdf", width = 8, height = 10)
+# par(mfrow = c(2,1))
+# plot(var2.olm)
+# plot(var2)
+# dev.off()
+```
+
+
+
+## Looking at Change in Relationships Upon Accounting for Phylogeny
+
+```{r fig.height = 8, fig.width = 10}
+#to run model of lambda values against change in r-squared (or r). Lets try r first
+  #first to calculate the change in r by subtracting the matrices (now that i've gone back to change the order so FWW is before FW on the original dataset from which the OLM correlation is calculated)
+delta.r <-  matrix.r - table.matrix #need the pgls matrix minus the OLM one
+delta.r <- as.data.frame(delta.r)
+
+pgls.r2 <- matrix.r
+pgls.r2 <- matrix.r^2
+
+olm.r2 <- table.matrix
+olm.r2 <- olm.r2^2
+delta.r2 <- as.data.frame(pgls.r2 - olm.r2)
+
+
+#to plot and have a look at these
+corrplot(as.matrix(delta.r2), method = 'color') #makes more sense like this as shaded cells than ellipses
+mtext(text = "Dependent Variable", side = 2, line = 1)
+mtext(text = "Independent Variable", side = 3, line = 1.25)
+```
+
+The corrplot way has intuitive and consistent colors but is very light bc the colour scale is set to max at much larger values.
+The heat colours matrix doesn't have as intuitive a colour matrix
+
+
+### Testing the correlations with lambda value
+
+Now to actually formally test a correlation between lambda magnitude and change in correlation coefficient
+```{r fig.height = 8, fig.width = 10}
+# lambda.values <- as.data.frame(lambda.matrix)
+# 
+# lambda.vs.delr <- data.frame('lambda' = unlist(lambda.values), 'delta_r' = unlist(delta.r))
+# lambda.vs.delr <- lambda.vs.delr[!is.na(lambda.vs.delr$lambda),]
+# ggplot(lambda.vs.delr, aes(x = lambda, y = delta_r)) + geom_point()
+# 
+# lambda.vs.abs.delr <- lambda.vs.delr
+# lambda.vs.abs.delr$delta_r <- abs(lambda.vs.abs.delr$delta_r)
+# ggplot(lambda.vs.abs.delr, aes(x = lambda, y = delta_r)) + geom_point() + geom_abline(slope = 0.136, intercept = 0.046)
+# ggplot(lambda.vs.delr, aes(x = lambda, y = delta_r)) + geom_point()
+# 
+# summary(lm(delta_r ~ lambda, data = lambda.vs.delr)) #no relationship
+# summary(lm(delta_r ~ lambda, data = lambda.vs.abs.delr)) #is a positive relationship but the main cloud of the data looks negatively correlated hence I suspect this is only because of the lambda = 0.000 points skewing things
+
+# length(lambda.vs.abs.delr$delta_r)
+# length(lambda.vs.abs.delr$lambda)
+# 
+# lambda.vs.abs <- lambda.vs.abs.delr[!lambda.vs.abs.delr$lambda < 0.001, ]
+# sum(lambda.vs.abs.delr$lambda < 0.001)
+# 
+# summary(lm(delta_r ~ lambda, data = lambda.vs.abs)) #no relationship now that those lambda = 0.000 were removed, however I'm not sure 
+```
+
+
+```{r}
+#to retest with r-squared
+pgls.r2 <- matrix.r
+pgls.r2 <- matrix.r^2
+
+olm.r2 <- olm.reg.r
+olm.r2 <- olm.r2^2
+delta.r2 <- as.data.frame(pgls.r2 - olm.r2)
+
+
+lambda.vs.delr2 <- data.frame('lambda' = unlist(as.data.frame(lambda.matrix)), 'delta_r2' = unlist(delta.r2))
+lambda.vs.delr2 <- lambda.vs.delr2[!is.na(lambda.vs.delr2$lambda),]
+ggplot(lambda.vs.delr2, aes(x = lambda, y = delta_r2)) + geom_point()
+summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2)) #nope no relationship
+
+#now try with absolute values instead
+lambda.vs.delr2.abs <- lambda.vs.delr2
+lambda.vs.delr2.abs$delta_r2 <- abs(lambda.vs.delr2.abs$delta_r2)
+ggplot(lambda.vs.delr2.abs, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(slope = 0.0524, intercept = 0.03728) #looks less like a smooth flow so I thing keeping it the other way would be best to avoid trucation at zero
+summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.abs)) # significant actually but mostly due to the many point near zero making the cloud look directional
+
+# now to rerun it without those points
+lambda.vs.delr2.2 <- lambda.vs.delr2[!lambda.vs.delr2$lambda < 0.01,]
+lambda.vs.delr2.abs.2 <- lambda.vs.delr2.abs[!lambda.vs.delr2.abs$lambda < 0.01,]
+ggplot(lambda.vs.delr2.2, aes(x = lambda, y = delta_r2)) + geom_point()
+ggplot(lambda.vs.delr2.abs.2, aes(x = lambda, y = delta_r2)) + geom_point()
+
+summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.2)) # Nope
+summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.abs.2)) # Borderline
+
+# x^2 #does element by element
+# x%*%x #matrix multiplication
+
+# ggplot(lambda.vs.delr2, aes(x = lambda, y = delta_r2)) + geom_point() + #geom_abline(slope = 0.27870, intercept = -0.22279)
+# ggplot(lambda.vs.delr2.abs, aes(x = lambda, y = delta_r2)) + geom_point() + #geom_abline(slope = -0.13919, intercept = 0.16934)
+# 
+# pdf('lambda_vs_delta_r2_and_abs_delta_r2_scatter.pdf')
+# ggplot(lambda.vs.delr2, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(slope = 0.27870, intercept = -0.22279)
+# ggplot(lambda.vs.delr2.abs, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(slope = -0.13919, intercept = 0.16934)
+# dev.off()
+```
+
+(So there is a relatively weak but present relationship between lambda magnitude and change in r-squared but not so much between lambda and r itself, once the lambda = 0.000 outliers were excluded since the estimation of lambda for those seemed to be a bit volatile. When the absolute magnitude of delta r2 is used the relationship becomes negative compared to positive when the sign is kept, whch somewhat suggests that lower lambda values tend to more often decrease the strength of the correlation, where as higher lambda values tend to increase it but I think this is almost entirely explained by the fact that the highest-lambda correlations tended to also be the reproductive traits, which we've already seen to be amplified by adding pgls, whereas the converse is true for the stem-habit traits.)
+
+Perhaps colour by dependent variable and see if this is true at all and if the pattern is observable.
+
+
+```{r}
+#to colour by dependent variable we need to first create another column in our plotting dataframe that specifies the dep. var. Since the row names of the matrices unlisted are the same those row names are also those of the combined dataframe
+
+#The acronym of the trait is the independent variable (column of dataframe) but the following number corresponds to the dependent variable (row number)
+
+# row.names(lambda.vs.delr2)[grepl("1$", row.names(lambda.vs.delr2))]
+# lambda.vs.delr2.col <- cbind(lambda.vs.delr2, rep(NA, length(lambda.vs.delr2$delta_r2)))
+# names(lambda.vs.delr2.col) <- c("lambda", "delta_r2", "dep_var")
+# 
+# lambda.vs.delr2.col$dep_var[grepl("1$", row.names(lambda.vs.delr2))] <- 'MH'
+# lambda.vs.delr2.col$dep_var[grepl("2$", row.names(lambda.vs.delr2))] <- 'RH'
+# lambda.vs.delr2.col$dep_var[grepl("3$", row.names(lambda.vs.delr2))] <- 'SD'
+# lambda.vs.delr2.col$dep_var[grepl("4$", row.names(lambda.vs.delr2))] <- 'RBT'
+# lambda.vs.delr2.col$dep_var[grepl("5$", row.names(lambda.vs.delr2))] <- 'SLA'
+# lambda.vs.delr2.col$dep_var[grepl("6$", row.names(lambda.vs.delr2))] <- 'LA'
+# lambda.vs.delr2.col$dep_var[grepl("7$", row.names(lambda.vs.delr2))] <- 'LM'
+# lambda.vs.delr2.col$dep_var[grepl("8$", row.names(lambda.vs.delr2))] <- 'FWW'
+# lambda.vs.delr2.col$dep_var[grepl("9$", row.names(lambda.vs.delr2))] <- 'FM'
+# lambda.vs.delr2.col$dep_var[grepl("10$", row.names(lambda.vs.delr2))] <- 'SM'
+# 
+# 
+# ggplot(lambda.vs.delr2.col, aes(x = lambda, y = delta_r2, color = dep_var)) + geom_point() + scale_color_manual(values = c('MH' = 'red', 'RH' = 'darkorange2', 'SD' = 'darkgoldenrod3', 'RBT' = 'chocolate4', 'SLA' = 'chartreuse', 'LA' = 'darkolivegreen3', 'LM' = 'chartreuse4', 'FWW' = 'darkslateblue', 'FM' = 'darkviolet', 'SM' = 'darkorchid4'))
+# 
+# ggplot(lambda.vs.delr2.col, aes(x = lambda, y = delta_r2, color = dep_var)) + geom_point() + scale_color_manual(values = c('MH' = 'red', 'RH' = 'red', 'SD' = 'orange', 'RBT' = 'orange', 'SLA' = 'yellow', 'LA' = 'yellow', 'LM' = 'blue', 'FWW' = 'darkslateblue', 'FM' = 'darkviolet', 'SM' = 'darkorchid4'))
+# 
+# ggplot(lambda.vs.delr2.col, aes(x = lambda, y = delta_r2, color = dep_var)) + geom_point() + scale_color_manual(values = c('MH' = 'red', 'RH' = 'red', 'SD' = 'red', 'RBT' = 'red', 'SLA' = 'yellow', 'LA' = 'yellow', 'LM' = 'blue', 'FWW' = 'violet', 'FM' = 'violet', 'SM' = 'violet'))
+```
+
+
+Now to redo the stats analysis between lambda and delta r2 but this time with half as many point as I'm only considering the models with the higher lambda so there will initially be the same number of points but half will be exact duplicates and so relatively easy to remove
+
+```{r fig.height = 8, fig.width = 10}
+#first need to remake the delta.r2 table in ider to have something to unlist
+  # matrix.r2.half from pgls already exists, since i used it to get to the r value initially
+  #olm.r2 already exists from the first time i ran this analysis since it shouldn't have changed
+matrix.r2.half <- matrix.r.half^2
+diag(matrix.r2.half)<- 0
+delta.r2.half <- as.data.frame(matrix.r2.half - olm.r2)
+
+corrplot(as.matrix(delta.r2.half), method = 'color') #apparently more colour
+corrplot(as.matrix(delta.r2), method = 'color', ylab = 'Dependent Variable', xlab = 'Independent Variable') #
+
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), asp = TRUE)
+corrplot(as.matrix(delta.r2), method = 'color')
+
+plot(lambda.half, col = heat.colors(10, rev = TRUE), breaks = c(0.400, 0.450, 0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850, 0.900), na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), asp = TRUE)
+corrplot(as.matrix(delta.r2.half), method = 'color')
+
+# pdf('lambda_table_symmetrical.pdf')
+# plot(lambda.half, col = heat.colors(10, rev = TRUE), breaks = c(0.000, 0.450, 0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850, 0.900), na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3))
+# mtext(text = "Independent Variable", side = 3, line = 2.5)
+# mtext(text = "Dependent Variable", side = 2, line = 2.5)
+# dev.off()
+# 
+# pdf('delta_r2_table_symmetrical.pdf')
+# corrplot(as.matrix(delta.r2.half), method = 'color')
+# mtext(text = "Dependent Variable", side = 2, line = 1)
+# mtext(text = "Independent Variable", side = 3, line = 1.25)
+# dev.off()
+
+
+# lambda.vs.delr2.half <- data.frame('lambda' = unlist(as.data.frame(lambda.half)), 'delta_r2' = unlist(delta.r2.half))
+# lambda.vs.delr2.half <- lambda.vs.delr2.half[!is.na(lambda.vs.delr2.half$lambda),]
+# lambda.vs.delr2.half <- cbind(lambda.vs.delr2.half, lambda.vs.delr2.col$dep_var)
+# colnames(lambda.vs.delr2.half) <- c('lambda', 'delta_r2', 'dep_var')
+# lambda.vs.delr2.half <- lambda.vs.delr2.half[!duplicated(lambda.vs.delr2.half$delta_r2),] #there are exactly 45 duplicates now and thy make the same shape on the plot so we can be sure this is done correctly 
+# ggplot(lambda.vs.delr2.half, aes(x = lambda, y = delta_r2)) + geom_point() +geom_abline(intercept = -0.15094, slope = 0.15872)
+# summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.half)) #yeah I suspect that single interfering lambda = 0.00010 point is causing trouble so I'll have to exclude it and run it again
+# lambda.vs.delr2.half2 <- lambda.vs.delr2.half[lambda.vs.delr2.half$lambda > 0.01,]
+# ggplot(lambda.vs.delr2.half, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(intercept = -0.4324, slope = 0.5407)
+# summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.half2)) # significant positive relationship accounting for ~ 20% of the variation so even more of a relationship now that 
+# ggplot(lambda.vs.delr2.half2, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(intercept = -0.4324, slope = 0.5407)
+# 
+# lambda.vs.delr2.half.abs <- lambda.vs.delr2.half
+# lambda.vs.delr2.half.abs$delta_r2 <- abs(lambda.vs.delr2.half$delta_r2)
+# lambda.vs.delr2.half.abs2 <- lambda.vs.delr2.half.abs[lambda.vs.delr2.half.abs$lambda > 0.01,]
+# summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2.half.abs2))
+# 
+# ggplot(lambda.vs.delr2.half.abs, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(slope = -0.24265, intercept = 0.25193)
+
+#now to export these
+# pdf('lambda_vs_delta_r2_and_abs_delta_r2_scatter_using_higher_lambda_model.pdf')
+# ggplot(lambda.vs.delr2.half2, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(intercept = -0.4324, slope = 0.5407)
+# ggplot(lambda.vs.delr2.half.abs, aes(x = lambda, y = delta_r2)) + geom_point() + geom_abline(slope = -0.24265, intercept = 0.25193) + ggtitle('this line not quite significant, P = 0.0695')
+# dev.off()
+```
+
+
+### Using Slope Coefficient
+
+```{r}
+#need to redo the change in r^2 as change in effect strength since r2 is not really comparable between these models
+coeff <- t(matrix.table.c)
+colnames(coeff) <- row.names(coeff)
+coeff.abs <- abs(coeff)
+
+#now to extract the coefficients of the lm models and take the absolute value in order to subtract these values from the pgls coefficients magnitude
+delta.c <- as.matrix(coeff.abs - olm.coeff.abs)
+corrplot(delta.c, method = "color")
+
+plot(as.matrix(coeff)) #this matrix (pgls coefficients) is not symmetrical so maybe if we do the transformation that takes the higher-lambda halves for comparison as well
+
+pgls.coeff.half <- matrix(NA, 11, 11)
+pgls.coeff.half[log2] <- as.matrix(coeff)[log2]
+pgls.coeff.half[!log2] <- t(as.matrix(coeff))[!log2]
+rownames(pgls.coeff.half) <- rownames(coeff)
+colnames(pgls.coeff.half) <- rownames(coeff)
+
+olm.coeff.half <- matrix(NA, 11, 11)
+olm.coeff.half[log2] <- as.matrix(olm.coeff)[log2]
+olm.coeff.half[!log2] <- t(as.matrix(olm.coeff))[!log2]
+rownames(olm.coeff.half) <- rownames(olm.coeff)
+colnames(olm.coeff.half) <- rownames(olm.coeff)
+
+delta.c.half <- abs(pgls.coeff.half) - abs(olm.coeff.half)
+corrplot(delta.c.half, method = "color")
+corrplot(as.matrix(delta.r2.half), method='color')
+corrplot(delta.c, method = "color")
+
+#corrplot(pgls.coeff.half-olm.coeff.half, method = 'color')
+
+# corrplot(delta.c.half/(6*max(delta.c.half)), method = "color")
+# corrplot(as.matrix(delta.r2.half), method='color')
+
+# pdf('change_in_slope_magnitude_colscaled.pdf')
+# corrplot(delta.c.half/(6*max(delta.c.half)), method = "color")
+# dev.off()
+# 
+# pdf('change_in_slope_magnitude.pdf')
+# corrplot(delta.c.half, method = "color")
+# dev.off()
+
+# largest magnitude on this plot is 0.333
+max(abs(delta.c))
+min(abs(delta.c))
+
+
+```
+
+```{r}
+lambda.vs.delcoeff <- data.frame('lambda' = unlist(as.data.frame(lambda.matrix)), 'delta_coeff' = unlist(as.data.frame(delta.c)))
+lambda.vs.delcoeff <- lambda.vs.delcoeff[!is.na(lambda.vs.delcoeff$lambda),]
+ggplot(lambda.vs.delcoeff, aes(x = lambda, y = delta_coeff)) + geom_point()
+summary(lm(delta_r2 ~ lambda, data = lambda.vs.delr2)) #nope no relationship
+lambda.vs.delcoeff.abs <- lambda.vs.delcoeff
+lambda.vs.delcoeff.abs[c('delta_coeff')] <- abs(lambda.vs.delcoeff.abs$delta_coeff)
+summary(lm(delta_coeff ~ lambda, data = lambda.vs.delcoeff)) #nope no relationship
+summary(lm(delta_coeff ~ lambda, data = lambda.vs.delcoeff.abs)) #significant and positive, conical
+ggplot(lambda.vs.delcoeff.abs, aes(x = lambda, y = delta_coeff)) + geom_point()
+
+
+lambda.vs.delcoeff.2 <- lambda.vs.delcoeff[!lambda.vs.delcoeff$lambda < 0.01,]
+lambda.vs.delcoeff.abs.2 <- lambda.vs.delcoeff.abs[!lambda.vs.delcoeff.abs$lambda < 0.01,]
+ggplot(lambda.vs.delcoeff.2, aes(x = lambda, y = delta_coeff)) + geom_point()
+summary(lm(delta_coeff ~ lambda, data = lambda.vs.delcoeff.2)) # nope
+summary(lm(delta_coeff ~ lambda, data = lambda.vs.delcoeff.abs.2)) # yes, cone-shaped
+
+lambda.vs.delcoeff.abs <- lambda.vs.delcoeff.2
+lambda.vs.delcoeff.abs$delta_coeff <- abs(lambda.vs.delcoeff.abs$delta_coeff)
+ggplot(lambda.vs.delcoeff.abs, aes(x = lambda, y = delta_coeff)) + geom_point() #+ geom_abline(slope = 0.0524, intercept = 0.03728) #looks less like a smooth flow so I think keeping it the other way would be best to avoid truncation at zero
+#summary(lm(delta_coeff ~ lambda, data = lambda.vs.delcoeff.abs)) #borderline actually but mostly due to
+
+```
+
+Here we have confirmed that our plot of the change in coefficient is not simply a plot of lambda intensity as the data is conical rather than linear; the greater the phylogenetic signal, the wider the range of change in relationship strength.
+
+
+```{r}
+# now to note which correlations change in significance between OLS and PGLS
+change.in.sig <- sig.models == sig.models.olm
+change.in.sig == t(change.in.sig) # unequal in 2 places (1 trait pair MH-LM)
+
+sig.models.olm == t(sig.models.olm) #all the same so it's just the pgls version that's the problem
+
+sig.models.half <- matrix(NA, 11, 11)
+sig.models.half[log2] <- sig.models[log2]
+sig.models.half[!log2] <- t(sig.models)[!log2]
+sig.models.half[is.na(sig.models.half) == TRUE] <-FALSE
+rownames(sig.models.half) <- rownames(sig.models)
+colnames(sig.models.half) <- rownames(sig.models.half)
+
+sig.models.half == t(sig.models.half) #now good
+
+change.in.sig2 <- sig.models.half == sig.models.olm
+
+change.in.sig #definitely different but only in the one place tht was unequal last time and only in one of the two paired positions (the one that we converted to the other)
+change.in.sig2 #this is only relating to what's on the network diagrams so only half the pgls models and only choosing the higher lambda of those where it is sig one way and not the other
+```
+
+Original data:
+Loss of significance upon accounting for phylogeny:
+MH-SD*
+MH-LM
+MH-FWW
+RH-RBT*
+RBT-LM*
+RBT-SM*
+SLA-LA
+SM-BOS
+
+Gain of significance upon accounting for phylogeny:
+LA-FWW
+LA-SM
+
+Changes with the updated dataset:
+There are fewer changes in significance
+
+Losses of sig. upon accounting for phylogeny:
+MH-LM
+MH-FWW
+RH-FWW*
+RBT-FWW*
+SLA-LA
+SM-BOS
+
+Gains of significance upon accounting for phylogeny:
+SLA-LM*
+LA-FWW
+LA-SM
+
+```{r}
+corrplot(delta.c.half, method = "shade", p.mat = !change.in.sig2, pch = 2, tl.col = "black", col.lim = c(-0.4,0.4), cl.length = 5)
+
+pdf("../Output_figures/delta_c_sig.pdf", height = 7, width = 9)
+corrplot(delta.c.half, method = "shade", p.mat = !change.in.sig2, pch = 2, tl.col = "black", tl.cex = 1.5, col.lim = c(-0.4,0.4), col = colorRampPalette(c("chocolate2", "chocolate2", "white", "cornflowerblue", "cornflowerblue"))(200), cl.length = 5, cl.cex = 1.6, cl.offset = 3)
+mtext("Change in Effect Size when accounting for Phylogeny", side = 4, line = 0.5, cex = 1.5)
+dev.off()
+max(delta.c.half) #~ 0.2
+min(delta.c.half) #~ -0.33
+#c('brown', "chocolate2", "white", "cornflowerblue", "darkblue")
+```
+
+
+# Checking if reciprcal differences in slope exceed S.E.
+
+Is the difference between reciprocal-model slope coefficients always within the standard error (of the tips analysis results)? We know this will not be true for the PGLS analysis as lambda changes with the reciprocal as well and is an additional source of variation.
+
+```{r}
+diff.c.abs <- abs(olm.coeff - t(olm.coeff))
+
+sort(diff.c.abs) #there's a .088, .079, and .077 then the rest are less than .05
+# also to check if it is also true for the pgls analysis, which it isn't since it isn't a symmetrical matrix because lambda can be very different so there's no way to know how much of that is just the lambda
+diff.c.abs.pgls <- abs(t(as.matrix(matrix.table.c)) - as.matrix(matrix.table.c))
+sort(diff.c.abs.pgls)
+
+#now for extracting the SE value for each olm model
+
+olm.coeff.SE <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, extract_SE))
+})
+
+olm.coeff.SE <- as.data.frame(olm.coeff.SE)
+colnames(olm.coeff.SE) <- colnames(table.matrix)
+row.names(olm.coeff.SE) <- colnames(olm.coeff.SE)
+olm.coeff.SE <- t(olm.coeff.SE) #now the right way around
+
+sum(diff.c.abs > olm.coeff.SE) # 4 models (including any reciprocals) where the difference between the slope coefficient of the model and that of its reciprocal exceeds the standard error of the former model
+# the models are (RBT - LA and LA - RBT, RH - LA, and SD - LA (first two pairs are reciprocals of each other))
+## For LA-RH  two models above are not even the ones used as they happne to not be the ones that generated the higher lambda in the pgls so even our fig.5 tile diagram doesn't use them in a calculation. For the reciprocal, the one we used happened to be the lower slope value than it's reciprocal as last time and as is more conservative.
+
+# note the difference matrix is symmetrical, but the the SE-matrix is not
+## the differences that were greater than the standard error were 0.077, 0.079, and 2 x 0.088
+diff.c.abs[diff.c.abs > olm.coeff.SE]
+olm.r2
+
+```
+
+
+```{r}
+
+olm.r2.reg <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, r_squared))
+})
+
+olm.r2.reg <- as.data.frame(olm.r2.reg)
+colnames(olm.r2.reg) <- colnames(table.matrix)
+row.names(olm.r2.reg) <- colnames(olm.r2.reg)
+olm.r2.reg <- t(olm.r2.reg) #now it's around the right way with the row indicating the dependent variable and colun the independent variable
+sort(olm.r2.reg)
+
+sort(abs(olm.coeff))
+
+
+olm.n <- lapply(olm.traits.list, function(model.list){
+  unlist(lapply(model.list, extract_n))
+})
+
+olm.n <- as.data.frame(olm.n)
+colnames(olm.n) <- colnames(table.matrix)
+row.names(olm.n) <- colnames(olm.n)
+olm.n <- t(olm.n) #now it's around the right way with the row indicating the dependent variable and colun the independent variable
+olm.df <- olm.n
+olm.n <- olm.df + 2
+
+min(olm.n) #same n as pgls, 145 now since BOS would have more missing data (was 150 before)
+max(olm.n) #164 max sample size, same as pgls
+```
+
+## Tables for Supp. Mat.
+
+```{r}
+olm.coeff.tab <- as.data.frame(olm.coeff) #matrix: already exists since I had to find the sign of relationships to assign to the r-value from r-squared
+
+olm.coeff.SE.tab <- as.data.frame(olm.coeff.SE) # matrix also already exists, since I had to figure out if the differences in slope for reciprocal models was greater than their own standard error
+
+olm.combined.param <- data.frame('Slope' = paste(unlist(t(olm.coeff.tab)), unlist(t(olm.coeff.SE.tab)), sep = " ± "), 'R_Squared' = unlist(as.data.frame(t(olm.reg.r2))), 'N' = unlist(as.data.frame(t(olm.n))), 'P_value' = unlist(as.data.frame(t(olm.P))))
+ind.var<- data.frame('I.V.' = rep(c('MH', 'RH', 'SD', 'RBT', 'SLA', 'LA', 'LM', 'FWW', 'FM', 'SM', 'BOS'), times = 11))
+olm.combined.param <- cbind(ind.var, olm.combined.param)
+# The following is not necessary for any part of the submission process but in case we need to send it to someone again to help with fixing the code here's the r-object version of it
+saveRDS(olm.combined.param,'../Output_figures/OLM_coefficients_full.rds')
+```
+
+Similar to the PGLS data, when transcribed to csv there are additional symbols that get added before every '±' in the slope column, but we can delete those in the MS document before submission. Also, we need to round all these numbers to a more reasonable number of decimal places before exporting.
+
+#### Fixing Rounding
+
+```{r}
+# already loaded this object but I'll rename to preserve original
+df <- olm.combined.param
+df[, 'D.V.'] <- row.names(df)
+
+# create a three colmn data frame with each component of the 'slope' sep by the space character
+sep_slope <- data.frame(do.call('rbind', strsplit(as.character(df$Slope),
+                                                  ' ', fixed = TRUE)))
+# apply the num_round function to cols 1 and 3 but not 2
+sep_slope <- data.frame(sep_slope[2], apply(sep_slope[c(1,3)],2,num_round))
+
+# paste them back together after rounding
+sep_slope$Slope <- paste(sep_slope$X1, sep_slope$X2, sep_slope$X3)
+
+#final object binds the two character columns, the new slope and rounds the remaining that need it
+df2 <- cbind(df[, c('D.V.', 'I.V.')],
+             Slope = sep_slope$Slope,
+             R_squared = num_round(df$R_Squared),
+             N = df$N,
+             P_value = num_round(df$P_value))
+
+olm.combined.param2 <- df2
+
+write.csv(olm.combined.param2, file = "../Output_figures/OLS_full_coefficients.csv", row.names = FALSE)
+```
+
+### Supp. Mat. Networks
+
+```{r}
+network.full.olm <- qgraph(olm.reg.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.full.olm$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.full.olm$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.full.olm$graphAttributes$Nodes$label.cex <- 1.3
+
+network.full.half.pgls <- qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.full.half.pgls$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.full.half.pgls$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.full.half.pgls$graphAttributes$Nodes$label.cex <- 1.3
+
+network.sig.only.olm <-qgraph(olm.reg.r.sig.only, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.sig.only.olm$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.sig.only.olm$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.sig.only.olm$graphAttributes$Nodes$label.cex <- 1.3
+
+network.sig.only.pgls <- qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.sig.only.pgls$graphAttributes$Nodes$color <- c("#31688EFF", "#31688EFF", "#FDE725FF", "#FDE725FF", "#35B779FF", "#35B779FF", "#35B779FF", "#482475FF", "#482475FF", "#482475FF", "#FFFFFFFF")
+network.sig.only.pgls$graphAttributes$Nodes$label.color <- c("black", "black", "black", "black", "black", "black", "black", "white", "white", "white", "black")
+network.sig.only.pgls$graphAttributes$Nodes$label.cex <- 1.3
+
+pdf('../Output_figures/suppmat_networks.pdf', width = 14, height = 10)
+par(mfrow = c(2,2))
+# the following are listed as the first two on the top row and the latter two in the bottom row
+plot(network.full.olm)
+plot(network.sig.only.olm)
+plot(network.full.half.pgls)
+plot(network.sig.only.pgls)
+dev.off()
+```
+
+# Saving Files for Later Analyses
+
+```{r}
+# this is for the multiple comparisons later
+saveRDS(olm.P, file = "../Input_data/OLM_P.rds")
+```
+
+
+
+# Testing New color palette
+
+```{r}
+# install.packages('colorBlindness')
+# library(colorBlindness)
+# 
+# p <- ggplot(data = iris, aes(x = Sepal.Length, y = Sepal.Width, color = Petal.Length)) +
+#   geom_point() +
+#   scale_color_viridis_c(option = "plasma")
+# 
+# cvdPlot(p)
+# 
+# cvdPlot(plot(network.edge.rem))
+# 
+# net1 <- network.edge.rem
+# 
+# matrix.pgls.1 <- net1$Arguments$input
+# 
+# edge.weight1 <- data.frame('weight' = net1$Edgelist$weight)
+# net2 <- 
+```
+
