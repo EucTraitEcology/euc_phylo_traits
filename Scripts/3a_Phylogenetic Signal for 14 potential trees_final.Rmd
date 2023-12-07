@@ -9,6 +9,10 @@ This Notebook serves to prepare each candidate tree and run and visualise the ou
 
 The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
 
+## How to use this script
+
+The script acts like one large single function to be rerun for each potential phylogeny. Each time the sections down to the end of 'Dot-Plot of Lambda values' is run choose a different number to put in line 69 to select a particular tree from that list of 15 and simply change the name of the output figure (line 194) and the final object lambda.full (line 187) to generate and store the result for each tree run to match the tree selected for that run. Rerun for each tree in the list of potential trees being tested.
+
 # Analysis
 
 ## Required Packages, Functions, and Data
@@ -48,6 +52,14 @@ divide_ci <- function(ci.val) {
   return(bounds.split)
 }
 
+# rounding function to three decimal places
+num_round <- function(x){
+  x_num <- as.numeric(x)
+  out <- round(x_num, 3)
+  return(out)
+}
+
+
 # data
 eucs.data <- read.csv("../Input_data/eucs_data.csv")
 eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
@@ -59,7 +71,7 @@ eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
 
 ```{r fig.height = 30, fig.width = 15}
 # Each subsequent candidate input tree will be named eucs.test.tree, each tree is known to be rooted in advance
-## first to read in the list object of all the newick forms of the potential trees
+## first to read in the list object of all the newick forms of the 15 potential trees
 pot.tree.list <- readRDS("../Input_data/Potential_trees_nwk_list.RData")
 ## picking which potential tree we're going to use for this run
 tree <- read.tree(text = pot.tree.list[[15]])
@@ -183,14 +195,14 @@ dot.plot.data <- lambda.full[order(lambda.full$Lambda),]
 lambda.full.null <- lambda.full
 
 # now to plot the tree using the above ordered data frame
-lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + theme_classic() + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + 
-scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 30), axis.title.x = element_text(size = 30), axis.text.x = element_text(size = 30)) +labs(y= "Pagels Lambda", x="")+ coord_flip()
+#lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + theme_classic() + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + 
+#scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 30), axis.title.x = element_text(size = 30), axis.text.x = element_text(size = 30)) +labs(y= "Pagels Lambda", x="")+ coord_flip()
 
 # now to save each iteration to a seperate pdf
-ggsave(lambda.dot.plot, file = "../Output_figures/Potential_trees_and_results/lambda_values_dotplot_null.pdf", width = 15, height = 10)
+#ggsave(lambda.dot.plot, file = "../Output_figures/Potential_trees_and_results/lambda_values_dotplot_null.pdf", width = 15, height = 10)
 ```
 
-All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass had a value significantly different from zero, but it was very low. The rest had moderate to high values of lambda.
+All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass had a value significantly different from zero, but it was very low. However, since updating the dataset in 2022, the lowest lambda value was from relative bark thickness. The rest had moderate to high values of lambda.
 
 Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon. Perhaps analysis of variance might help with figuring this out??
 
@@ -645,6 +657,26 @@ summary(mh.sd.prel.null)
 Here we can similarly see that the lambda values vary little (0.790 - 0.803) across 15 different trees and the non-significance also does not change with the p-value hovering around 0.10-0.15.
 
 
+Just a quick check to test that the differences are mainly due to updates in the dataset and not the additional taxa. I will prune down our tree back to the 160 taxa we had before adding the extra 4.
+
+```{r}
+tree.test1 <- read.tree(file = '../Input_data/final_tree.txt')
+tree.test1$node.label <- NULL
+tree.test1$tip.label <- gsub("_", " ", tree$tip.label)
+tree.test1 <- drop.tip(tree.test1, c('Corymbia eximia', 'Eucalyptus viridis', 'Eucalyptus goniocalyx subsp. viridissima', 'Eucalyptus leucoxylon subsp. pruinosa', 'Eucalyptus socialis'))
+
+eucs.test.tree <- tree.test1
+eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
+eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+
+sla.la.prel.test1 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.la.prel.test1)
+mh.sd.prel.test1 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(mh.sd.prel.test1)
+```
+
+
 ## Some extra tests of effect at deeper divergences
 
 (Don't need to publish this but good to know and check)
@@ -853,7 +885,7 @@ compare.lambda.trees2$range <- unlist(lapply(as.data.frame(t(as.matrix(compare.l
   return(range)
 }))
 
-# now to construct two culumn with the CI ranged for each tree
+# now to construct two columns with the CI ranged for each tree
 extra.trees.CI.ranges <- data.frame("range_CI_OG1" = lambda.full.extra$range_CI, "range_CI_OG2" = lambda.full.extra2$range_CI)
 
 # adding these column to the compare.range.CI.trees
@@ -878,4 +910,42 @@ final.lambda.comparisons2 <- left_join(compare.lambda.trees2, final.tree.lambdas
 write.csv(final.lambda.comparisons2, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2.csv')
 ```
 
-We can see that the 
+
+#### Final Formatting of Table
+
+Original horizontal version does not fit well on a page (portrait-orientation) so I'll try transposing it and see if that works.
+Also, we need to round the numbers off a bit, lets to 4 dp for now.
+
+```{r}
+final.lambda.comparisons2 <- read.csv("../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2.csv")
+final.lambda.comparisons.2.2 <- as.data.frame(t(final.lambda.comparisons2))
+
+# already loaded this object but I'll rename to preserve original
+df <- final.lambda.comparisons.2.2
+
+# now to clean up unecessary rows
+colnames(df) <- c("Max_height", "Relative_Height", "Stem_Density", "Relative_Bark_Thickness", "SLA", "Leaf_Area", "Leaf_Mass", "Fruit_Mass", "Fruit_Wall_Width", "Seed_Mass")
+df <- df[!row.names(df) %in% c('X', 'Traits'),]
+
+# now to round
+df2 <- data.frame('Max. height' = unlist(lapply(df$Max_height, num_round)),
+                  'Relative Height' = unlist(lapply(df$Relative_Height, num_round)), 
+                  'Stem Density' = unlist(lapply(df$Stem_Density, num_round)),
+                  'Relative Bark Thickness' = unlist(lapply(df$Relative_Bark_Thickness, num_round)),
+                  'SLA' = unlist(lapply(df$SLA, num_round)),
+                  'Leaf Area' = unlist(lapply(df$Leaf_Area, num_round)),
+                  'Leaf Mass' = unlist(lapply(df$Leaf_Mass, num_round)),
+                  'Fruit Mass' = unlist(lapply(df$Fruit_Mass, num_round)),
+                  'Fruit Wall Width' = unlist(lapply(df$Fruit_Wall_Width, num_round)),
+                  'Seed Mass' = unlist(lapply(df$Seed_Mass, num_round)))
+row.names(df2) <- row.names(df)
+colnames(df2) <- colnames(df)
+
+final.lambda.comparisons.2.3 <- df2
+
+```
+
+```{r}
+write.csv(final.lambda.comparisons.2.3, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2_vertical_rounded.csv')
+```
+
