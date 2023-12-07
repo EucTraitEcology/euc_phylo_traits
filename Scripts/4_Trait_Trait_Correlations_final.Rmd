@@ -1,0 +1,1476 @@
+---
+title: "PGLS Trait-Trait Correlations"
+output: html_notebook
+---
+# Introduction
+
+The purpose of this notebook is to run pgls trait-trait correlations and visualise the outputs. It requires that a phylogentic tree and trait-dataset in wide-format be already made and supplied.
+
+# Required Packages, Functions, and Data
+
+```{r}
+# Packages
+library(ape)
+library(ggtree)
+library(caper)
+library(corrplot)
+library(qgraph)
+library(plot.matrix)
+
+# Functions
+
+## the following shortcut works better regarding parameters of plotting trees in some cases where plot_dim1 shrinks the tree severely to the left
+plot_dim2 <- function(phy) {
+  # plots with the correct size text and alignment for 158-225 taxa trees like will be used
+  plot(ggtree(phy) +xlim(0, 1.5) + geom_tiplab(size=5)) 
+}
+
+## the following is for extracting the calculated r-squared value from a pgls regression model, especially useful when list-applied to many models simultaneously
+r_squared <- function(model) {
+  x <- summary(model)
+  x$r.squared
+}
+
+#the following allows extraction of the slope coefficient of a pgls regression model, especially useful when list-applied to a large number of models simlutaneously
+extract_slope <- function(model) {
+  x <- summary(model)
+  x$coefficients[2,1]
+}
+
+#to extract the lambda values from models (for generating tables of lambda values from trait-correlation models fitted for pairs of variables)
+extract_lambda <- function(model){
+  x <- model
+  lambda <- x$param[2]
+  return(lambda)
+}
+
+extract_P <- function(model) {
+  #extracts the P-value for the slope coefficient of the independent variable in a bvariate correlation
+  x <- summary(model)
+  P <- x$coefficients[c(as.character(x$call$formula[[3]])), c('Pr(>|t|)')]
+  return(P)
+}
+
+extract_SE <- function(model) { 
+  #this extract the standard error of the slope coefficient for a single independent variable (or maybe the first one mentioned if there are more than one but it is untested in those cases)
+  x <- summary(model)
+  s.e.val <- x$coefficients[c(as.character(x$call$formula[[3]])),c('Std. Error')]
+  return(s.e.val)
+}
+
+extract_n <- function(model) {
+  x <- summary(model)
+  n <- x$df[[2]]
+  return(n)
+}
+
+# rounding function to three decimal places
+num_round <- function(x){
+  x_num <- as.numeric(x)
+  out <- round(x_num, 3)
+  return(out)
+}
+
+
+# Data import
+eucs.data <- read.csv("../Input_data/eucs_data.csv")
+eucs.data <- subset(eucs.data, select = -c(X))
+eucs.log.data <- read.csv("../Input_data/eucs_log_data.csv")
+eucs.log.data <- subset(eucs.log.data, select = -c(X))
+eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
+eucs.scaled.data <- subset(eucs.scaled.data, select = -c(X))
+
+# phylogenetic tree
+tree <- read.tree("../Input_data/final_tree.txt")
+```
+
+
+
+# Analysis
+
+## Data Preparation
+
+```{r fig.width = 15, fig.height = 25}
+# First to get the imported phylogeny into correct form for joining with trait data
+## remove some erroneous node labels that cause issues later in case they appear
+tree$node.label <- NULL
+## converts tip names back into space-separated rather than underscore (the default when reading from newick format)
+tree$tip.label <- gsub("_", " ", tree$tip.label)
+## trees require branch length for analysis, this method generates it from topology-only trees allowing us to calculate genetic closeness beween taxa based on the number of nodes from the root they share instead of using the length of branches, which has been removed as part of the tree-building process anyway
+tree <- compute.brlen(tree, method = "Grafen", power = 1)
+# just to check that the tree looks normal and like what we expect it to
+plot_dim2(tree)
+
+
+# Preparing the matching objects that allow the package to link data frames to tree tips
+
+## for the untransformed data in case we want to use it
+eucs.obj <- comparative.data(phy = tree, data = eucs.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.obj$dropped$unmatched.rows # the only unmatched taxa are: E. bunyip and E. carolaniae, E. dendromorpha and E. robusta, and Tristaniopsis laurina
+eucs.obj$dropped$tips #none as no tips on the tree are redundant
+
+## for the log-transformed data in case we want to use it
+eucs.log.obj <- eucs.log.obj <- comparative.data(phy = tree, data = eucs.log.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.log.obj$dropped$unmatched.rows 
+
+## for the scaled data, which we will most likely use
+eucs.scaled.obj <- comparative.data(phy = tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+eucs.scaled.obj$dropped$unmatched.rows
+```
+
+
+## Trait-Trait Correlations
+
+###### Max Height
+
+
+```{r}
+max.height.rh <- pgls(max_height_m ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(max.height.rh)
+```
+
+
+```{r}
+max.height.std <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(max.height.std)
+# plot(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.data)
+# abline(max.height.std)
+```
+
+
+```{r}
+max.height.bark <- pgls(max_height_m ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(max.height.bark)
+```
+
+
+```{r}
+max.height.sla <- pgls(max_height_m ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.sla)
+# plot(max_height_m ~ sla_mm2_per_mg, data = eucs.scaled.data)
+# abline(max.height.sla)
+```
+ 
+
+```{r}
+max.height.sla.2 <- pgls(max_height_m ~ sla_mm2_per_mg, data = eucs.obj, lambda = "ML")
+summary(max.height.sla.2)
+```
+
+
+```{r}
+max.height.lfa <- pgls(max_height_m ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.lfa)
+# plot(max_height_m ~ leaf_area_cm2, data = eucs.scaled.data)
+# abline(max.height.lfa)
+```
+
+
+```{r}
+max.height.lms <- pgls(max_height_m ~ leaf_mass_g, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.lms)
+```
+
+
+
+```{r}
+max.height.fms <- pgls(max_height_m ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = "ML", bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(max.height.fms)
+```
+
+
+
+```{r}
+max.height.fwl <- pgls(max_height_m ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.fwl)
+```
+
+
+
+```{r}
+max.height.sms <- pgls(max_height_m ~ seed_mass_mg, data = eucs.scaled.obj, lambda = "ML")
+summary(max.height.sms)
+```
+
+###### Relative Height
+
+
+```{r}
+rel.height.mh <- pgls(relative_height_by_girth ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.mh)
+```
+
+```{r}
+rel.height.std <- pgls(relative_height_by_girth ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.std)
+```
+
+```{r}
+rel.height.bark <- pgls(relative_height_by_girth ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.bark)
+```
+
+```{r}
+rel.height.sla <- pgls(relative_height_by_girth ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.sla)
+```
+
+```{r}
+rel.height.lfa <- pgls(relative_height_by_girth ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.lfa)
+```
+
+```{r}
+rel.height.lms <- pgls(relative_height_by_girth ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.lms)
+```
+
+```{r}
+rel.height.fms <- pgls(relative_height_by_girth ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.fms)
+```
+
+```{r}
+rel.height.fwl <- pgls(relative_height_by_girth ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.fwl)
+```
+
+```{r}
+rel.height.sms <- pgls(relative_height_by_girth ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.sms)
+```
+
+
+###### Stem Sapwood Density
+
+
+```{r}
+stem.density.mh <- pgls(stem_density_g_per_ml ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.mh)
+# plot(stem_density_g_per_ml ~ max_height_m, data = eucs.scaled.data, xlab = "Log-scaled Max. Height", ylab = "Log-scaled Stem Density")
+# abline(stem.density.mh)
+```
+
+
+```{r}
+stem.density.rh <- pgls(stem_density_g_per_ml ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.rh)
+```
+
+
+
+```{r}
+stem.density.bark <- pgls(stem_density_g_per_ml ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.bark)
+```
+
+
+```{r}
+stem.density.sla <- pgls(stem_density_g_per_ml ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.sla)
+# plot(stem_density_g_per_ml ~ sla_mm2_per_mg, data = eucs.scaled.data, xlab = "Log-scaled SLA", ylab = "Log-scaled Stem Density")
+# abline(stem.density.sla)
+```
+
+
+```{r}
+stem.density.lfa <- pgls(stem_density_g_per_ml ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.lfa)
+```
+
+
+```{r}
+stem.density.lms <- pgls(stem_density_g_per_ml ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(stem.density.lms)
+```
+
+
+```{r}
+stem.density.fwl <- pgls(stem_density_g_per_ml ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.fwl)
+```
+
+
+```{r}
+stem.density.fms <- pgls(stem_density_g_per_ml ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3)))
+summary(stem.density.fms)
+```
+
+
+```{r}
+stem.density.sms <- pgls(stem_density_g_per_ml ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.sms)
+```
+
+
+###### Relative Bark Thickness
+
+
+```{r}
+bark.mh <- pgls(relative_bt_by_girth ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.mh)
+```
+
+
+```{r}
+bark.rh <- pgls(relative_bt_by_girth ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.rh)
+```
+
+
+```{r}
+bark.std <- pgls(relative_bt_by_girth ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.std)
+```
+
+
+
+```{r}
+bark.sla <- pgls(relative_bt_by_girth ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.sla)
+```
+
+
+```{r}
+bark.lfa <- pgls(relative_bt_by_girth ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.lfa)
+```
+
+
+```{r}
+bark.lms <- pgls(relative_bt_by_girth ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.lms)
+```
+
+
+```{r}
+bark.fms <- pgls(relative_bt_by_girth ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.fms)
+```
+
+
+```{r}
+bark.fwl <- pgls(relative_bt_by_girth ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.fwl)
+```
+
+
+```{r}
+bark.sms <- pgls(relative_bt_by_girth ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.sms)
+```
+
+
+
+###### SLA
+
+```{r}
+sla.mh <- pgls(sla_mm2_per_mg ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.mh)
+# plot(sla_mm2_per_mg ~ max_height_m, data= eucs.scaled.data, xlab = "Log-scaled Max. Height", ylab = "Log-scaled SLA")
+# abline(sla.mh)
+```
+
+
+```{r}
+sla.rh <- pgls(sla_mm2_per_mg ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.rh)
+```
+
+
+```{r}
+sla.std <- pgls(sla_mm2_per_mg ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.std)
+```
+
+
+```{r}
+sla.bark <- pgls(sla_mm2_per_mg ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.bark)
+```
+
+
+```{r}
+sla.lfa <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.lfa)
+```
+
+
+```{r}
+sla.lms <- pgls(sla_mm2_per_mg ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML', bounds = list(lambda = c(0.0001, 1), kappa = c(1e-6, 3), delta = c(1e-6, 3))) #needed to specify slightly narrower bound due to the optimisation error
+summary(sla.lms)
+```
+
+
+```{r}
+sla.fwl <- pgls(sla_mm2_per_mg ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.fwl)
+```
+
+
+```{r}
+sla.fms <- pgls(sla_mm2_per_mg ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.fms)
+```
+
+
+```{r}
+sla.sms <- pgls(sla_mm2_per_mg ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.sms)
+```
+
+
+###### Leaf Area
+
+
+
+```{r}
+leaf.area.mh <- pgls(leaf_area_cm2 ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.mh)
+```
+ 
+ 
+```{r}
+leaf.area.rh <- pgls(leaf_area_cm2 ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.rh)
+```
+
+
+```{r}
+leaf.area.std <- pgls(leaf_area_cm2 ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.std)
+```
+
+
+```{r}
+leaf.area.sla <- pgls(leaf_area_cm2 ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.sla)
+# plot(leaf_area_cm2 ~ sla_mm2_per_mg, data = eucs.scaled.data)
+# abline(leaf.area.sla)
+```
+
+
+```{r}
+leaf.area.bark <- pgls(leaf_area_cm2 ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.bark)
+```
+
+
+```{r}
+leaf.area.lms <- pgls(leaf_area_cm2 ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.lms)
+# plot(leaf_area_cm2 ~ leaf_mass_g, data = eucs.scaled.data, xlab="Log-scaled Leaf Mass", ylab="Log-scaled Leaf Area")
+# abline(leaf.area.lms)
+```
+
+
+```{r}
+leaf.area.fwl <- pgls(leaf_area_cm2 ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.fwl)
+```
+
+
+```{r}
+leaf.area.fms <- pgls(leaf_area_cm2 ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.fms)
+```
+
+
+```{r}
+leaf.area.sms <- pgls(leaf_area_cm2 ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.sms)
+```
+
+
+
+###### Leaf Mass
+
+
+```{r}
+leaf.mass.mh <- pgls(leaf_mass_g ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.mh)
+```
+
+
+```{r}
+leaf.mass.rh <- pgls(leaf_mass_g ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.rh)
+```
+
+
+```{r}
+leaf.mass.std <- pgls(leaf_mass_g ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.std)
+```
+
+
+```{r}
+leaf.mass.bark <- pgls(leaf_mass_g ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.bark)
+```
+
+
+```{r}
+leaf.mass.sla <- pgls(leaf_mass_g ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.sla)
+```
+
+
+```{r}
+leaf.mass.lfa <- pgls(leaf_mass_g ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.lfa)
+```
+
+
+```{r}
+leaf.mass.fwl <- pgls(leaf_mass_g ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.fwl)
+```
+
+
+```{r}
+leaf.mass.fms <- pgls(leaf_mass_g ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.fms)
+# plot(leaf_mass_g ~ fruit_mass_mg, data = eucs.scaled.data, xlab = "Log-scaled Fruit Mass", ylab = "Log-scaled  Leaf Mass")
+# abline(leaf.mass.fms)
+```
+
+
+```{r}
+leaf.mass.sms <- pgls(leaf_mass_g ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.sms)
+```
+
+
+
+###### Fruil Wall Width
+
+
+```{r}
+fruit.wall.mh <- pgls(fruit_wall_width_mm ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.mh)
+```
+
+
+```{r}
+fruit.wall.rh <- pgls(fruit_wall_width_mm ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.rh)
+```
+
+
+```{r}
+fruit.wall.std <- pgls(fruit_wall_width_mm ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.std)
+```
+
+
+```{r}
+fruit.wall.bark <- pgls(fruit_wall_width_mm ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.bark)
+```
+
+
+```{r}
+fruit.wall.sla <- pgls(fruit_wall_width_mm ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.sla)
+```
+
+
+```{r}
+fruit.wall.lfa <- pgls(fruit_wall_width_mm ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.lfa)
+```
+
+
+```{r}
+fruit.wall.lms <- pgls(fruit_wall_width_mm ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.lms)
+```
+
+
+```{r}
+fruit.wall.fms <- pgls(fruit_wall_width_mm ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.fms)
+# plot(fruit_wall_width_mm ~ fruit_mass_mg, data = eucs.scaled.data, xlab = "Log-scaled Fruit Mass", ylab = "Log-scaled Fruit Wall Width")
+# abline(fruit.wall.fms)
+```
+
+
+```{r}
+fruit.wall.sms <- pgls(fruit_wall_width_mm ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.sms)
+# plot(fruit_wall_width_mm ~ seed_mass_mg, data=eucs.scaled.data, xlab="Log-scaled Seed Mass", ylab="Log-scaled Fruit Wall Width")
+# abline(fruit.wall.sms)
+```
+
+
+
+###### Fruit Mass
+
+
+```{r}
+fruit.mass.mh <- pgls(fruit_mass_mg ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.mh)
+```
+
+
+```{r}
+fruit.mass.rh <- pgls(fruit_mass_mg ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.rh)
+```
+
+
+```{r}
+fruit.mass.std <- pgls(fruit_mass_mg ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.std)
+```
+
+
+```{r}
+fruit.mass.bark <- pgls(fruit_mass_mg ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.bark)
+```
+
+
+```{r}
+fruit.mass.sla <- pgls(fruit_mass_mg ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.sla)
+```
+ 
+
+```{r}
+fruit.mass.lfa <- pgls(fruit_mass_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.lfa)
+```
+
+
+```{r}
+fruit.mass.lms <- pgls(fruit_mass_mg ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.lms)
+```
+
+
+```{r}
+fruit.mass.fwl <- pgls(fruit_mass_mg ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.fwl)
+```
+
+
+```{r}
+fruit.mass.sms <- pgls(fruit_mass_mg ~ seed_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.sms)
+```
+
+
+###### Seed Mass
+
+
+```{r}
+seed.mass.mh <- pgls(seed_mass_mg ~ max_height_m, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.mh)
+```
+
+
+```{r}
+seed.mass.rh <- pgls(seed_mass_mg ~ relative_height_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.rh)
+```
+
+
+```{r}
+seed.mass.std <- pgls(seed_mass_mg ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.std)
+```
+
+
+```{r}
+seed.mass.bark <- pgls(seed_mass_mg ~ relative_bt_by_girth, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.bark)
+```
+
+
+```{r}
+seed.mass.sla <- pgls(seed_mass_mg ~ sla_mm2_per_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.sla)
+```
+
+
+```{r}
+seed.mass.lfa <- pgls(seed_mass_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.lfa)
+```
+
+
+```{r}
+seed.mass.lms <- pgls(seed_mass_mg ~ leaf_mass_g, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.lms)
+```
+
+
+```{r}
+seed.mass.fwl <- pgls(seed_mass_mg ~ fruit_wall_width_mm, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.fwl)
+```
+
+
+```{r}
+seed.mass.fms <- pgls(seed_mass_mg ~ fruit_mass_mg, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.fms)
+# plot(seed_mass_mg ~ fruit_mass_mg, data = eucs.scaled.data, xlab="Log-scaled Fruit Mass", ylab="Log-scaled Seeed Mass")
+# abline(seed.mass.fms)
+```
+
+So it appears that leaf mass and the reproductive traits are all positively correlated. This makes sense if we think of corner's rules (i.e. the relationships between leaf mass and fruit mass due to them being supported by the same branches with the same mechanical limitations on the sieze of appendage they can support) and, since the reproductive traits are all strongly correlated to one another, the correlation LM experiences with the other reproductive traits can be safely thought of as a residual correlation. Similar residual correlation can be thought of between leaf area and the reproductive traits, since leaf area is strongly correlated to leaf mass because both traits are measures of leaf size.
+
+
+Are there any correlations for which the calculated lambda value is not significantly different from 0 or 1?
+
+### Lignotuber-Only vs. everything else
+
+Here we are going to fit linear models with the independent variable being the categorical of post-fire regeneration strategy (2 = Lignotuber-Only resprouters and 0 = all other known resprouting categories (Combination Resprouter, Stem-Only Resprouter, and Obligate Seeder)). The boxplots of all 4 categories in the supplementary material of the manuscript suggest that, at least for the traits where there was significant differences between categories, Lignotuber-Only Resprouting is more different to the other three categories than they are to each other. We code this new binary variable as 0 and 2 instead of the default 0 and 1 to make sure the standard deviation of our scaled continuous data (i.e. 1) and the standard deviation of this data will be more similar (sd of this variable is 0.8743 instead of 1 but close enough). Also this re-scales the slope, which we use later in figure 5 to make the tile diagram of change in slope from OLS to PGLS models, back into a similar range as the rest of the models shown in that diagram. It shouldn't affect the r-value or p-value though.
+
+The following pgls models can only be fit with the continuous variable being the dependent variable as lambda cannot be calculated for categorical variables using this package/functions/method/code. Hence, we can only run the variable in a single configuration on the axes, instead of running it an rerunning after reversing which variable is the (in)dependent variable. This doesn't seem like it is an issue as we only did that to be most conservative, but its an optional level of conservative inspired tby the fact that having different values for parameters disrupts plotting and summary analyses. Having it only work one way is perfectly acceptable.
+
+
+```{r}
+max.height.LO <- pgls(max_height_m ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(max.height.LO)
+```
+
+```{r}
+rel.height.LO <- pgls(relative_height_by_girth ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(rel.height.LO)
+```
+
+```{r}
+stem.density.LO <- pgls(stem_density_g_per_ml ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(stem.density.LO)
+```
+
+```{r}
+bark.LO <- pgls(relative_bt_by_girth ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(bark.LO)
+```
+
+```{r}
+sla.LO <- pgls(sla_mm2_per_mg ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(sla.LO)
+```
+
+```{r}
+leaf.area.LO <- pgls(leaf_area_cm2 ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.area.LO)
+```
+
+```{r}
+leaf.mass.LO <- pgls(leaf_mass_g ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(leaf.mass.LO)
+```
+
+```{r}
+fruit.wall.LO <- pgls(fruit_wall_width_mm ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.wall.LO)
+```
+
+```{r}
+fruit.mass.LO <- pgls(fruit_mass_mg ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(fruit.mass.LO)
+```
+
+```{r}
+seed.mass.LO <- pgls(seed_mass_mg ~ LO2, data = eucs.scaled.obj, lambda = 'ML')
+summary(seed.mass.LO)
+```
+
+##### What happens when we sd-scale and mean-centre the LO2 variable
+
+```{r}
+#eucs.scaled.data$LO2 <- scale(eucs.scaled.data$LO2)
+```
+
+
+
+##### Checking effect of scaling the categories
+```{r}
+# just to check that the same r-value and p-value are indeed calculated regardless of the scaling factor
+
+eucs.scaled.data.test <- eucs.scaled.data
+eucs.scaled.data.test$LO2[eucs.scaled.data.test$LO2 == 2 & !is.na(eucs.scaled.data.test$LO2)] <- 1
+
+eucs.scaled.obj.test <- comparative.data(phy = tree, data = eucs.scaled.data.test, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+
+summary(max.height.LO)
+summary(pgls(max_height_m ~ LO2, data = eucs.scaled.obj.test, lambda = 'ML'))
+```
+
+It appears we can verify that the scaling factor does not change the r-squared, adjusted-r-squared, p-value or lambda, and it scales the slope and its standard error by exactly the expected amount (here we went from 0-2 to 0-1 and the slope and its standard error doubled).
+
+
+# Plots
+
+
+## Extracting Coefficients from PGLS Models
+
+In order to create a dataframe of every model we want to represent in our 10 x 10 table we need to find a model to stand in for the main diagonal elements (traits correlated with themselves) that would have a coefficient of 1.00 and an r-squared of 1.00 also. We only need a single model for this and we can recycle this object for every trait's perfect fit with itself, since the results would be the same regardless of the trait being considered.
+ 
+```{r}
+#to regress a variable with itself, it needs to be regressed against another variable with a different name but the same datapoints, since the regression functions don't allow the regression of variables with the same name
+eucs.scaled.data.doubled <- cbind(eucs.scaled.data, eucs.scaled.data[c("max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_mass_mg", "fruit_wall_width_mm", "seed_mass_mg")])
+
+#now to rename the columns
+names(eucs.scaled.data.doubled) <- c("taxon", "location", "second_location", "max_height_m", "relative_height_by_girth", "stem_density_g_per_ml", "relative_bt_by_girth", "sla_mm2_per_mg", "leaf_area_cm2", "leaf_mass_g", "fruit_mass_mg", "fruit_wall_width_mm", "seed_mass_mg", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sprouting_Type3", "Sprouting_Type4", "LO2", "Sieberi", "max_height_m2", "relative_height_by_girth2", "stem_density_g_per_ml2", "relative_bt_by_girth2", "sla_mm2_per_mg2", "leaf_area_cm22", "leaf_mass_g2", "fruit_mass_mg2", "fruit_wall_width_mm2", "seed_mass_mg2")  
+
+#now need to run models of variables against themselves so that r-squared (and slope coefficient) can be 1 and can be placed in the list wherever required
+perfect.fit <- lm(max_height_m ~ max_height_m2, data = eucs.scaled.data.doubled)
+summary(perfect.fit)
+```
+
+Now to make the dataframe/matrix of all models in order to extract the coefficients.
+
+```{r}
+mh.list <- list(perfect.fit, max.height.rh, max.height.std, max.height.bark, max.height.sla, max.height.lfa, max.height.lms, max.height.fwl, max.height.fms, max.height.sms, max.height.LO)
+
+rh.list <- list(rel.height.mh, perfect.fit, rel.height.std, rel.height.bark, rel.height.sla, rel.height.lfa, rel.height.lms, rel.height.fwl, rel.height.fms, rel.height.sms, rel.height.LO)
+
+stem.density.list <- list(stem.density.mh, stem.density.rh, perfect.fit, stem.density.bark, stem.density.sla, stem.density.lfa, stem.density.lms, stem.density.fwl, stem.density.fms, stem.density.sms, stem.density.LO)
+
+bark.list <- list(bark.mh, bark.rh, bark.std, perfect.fit, bark.sla, bark.lfa, bark.lms, bark.fwl, bark.fms, bark.sms, bark.LO)
+
+sla.list <- list(sla.mh, sla.rh, sla.std, sla.bark, perfect.fit, sla.lfa, sla.lms, sla.fwl, sla.fms, sla.sms, sla.LO)
+
+leaf.area.list <- list(leaf.area.mh, leaf.area.rh, leaf.area.std, leaf.area.bark, leaf.area.sla, perfect.fit, leaf.area.lms, leaf.area.fwl, leaf.area.fms, leaf.area.sms, leaf.area.LO)
+
+leaf.mass.list <- list(leaf.mass.mh, leaf.mass.rh, leaf.mass.std, leaf.mass.bark, leaf.mass.sla, leaf.mass.lfa, perfect.fit, leaf.mass.fwl, leaf.mass.fms, leaf.mass.sms, leaf.mass.LO)
+
+fruit.wall.list <- list(fruit.wall.mh, fruit.wall.rh, fruit.wall.std, fruit.wall.bark, fruit.wall.sla, fruit.wall.lfa, fruit.wall.lms, perfect.fit, fruit.wall.fms, fruit.wall.sms, fruit.wall.LO)
+
+fruit.mass.list <- list(fruit.mass.mh, fruit.mass.rh, fruit.mass.std, fruit.mass.bark, fruit.mass.sla, fruit.mass.lfa, fruit.mass.lms, fruit.mass.fwl, perfect.fit, fruit.mass.sms, fruit.mass.LO)
+
+seed.mass.list <- list(seed.mass.mh, seed.mass.rh, seed.mass.std, seed.mass.bark, seed.mass.sla, seed.mass.lfa, seed.mass.lms, seed.mass.fwl, seed.mass.fms, perfect.fit, seed.mass.LO)
+
+LO.list <- list(max.height.LO, rel.height.LO, stem.density.LO, bark.LO, sla.LO, leaf.area.LO, leaf.mass.LO, fruit.wall.LO, fruit.mass.LO, seed.mass.LO, perfect.fit)
+
+traits.list <- list(mh.list, rh.list, stem.density.list, bark.list, sla.list, leaf.area.list, leaf.mass.list, fruit.wall.list, fruit.mass.list, seed.mass.list, LO.list)
+
+saveRDS(traits.list, file = '../Input_data/models_list.RData')
+```
+
+
+Now to Extract the pseudo-r-squared to arrive at the pseudo-r-value by taking the square root and assigning a negative sign to those relationsips where the slope coefficient (here 'c') is negative.
+
+```{r}
+full.list <- lapply(traits.list, function(model.list){
+  unlist(lapply(model.list, r_squared))
+})
+
+matrix.table.r2 <- data.frame('MH' = full.list[[1]], 'RH' = full.list[[2]], 'SD' = full.list[[3]], 'RBT' = full.list[[4]], 'SLA' = full.list[[5]], 'LA' = full.list[[6]], 'LM' = full.list[[7]], 'FWW' = full.list[[8]], 'FM' = full.list[[9]], 'SM' = full.list[[10]], 'BOS' = full.list[[11]])
+
+matrix.table.r <- as.data.frame(lapply(matrix.table.r2, sqrt))
+
+# Note: the BOS trait in the final row/column is mirrored and equal
+
+#now to make sure that the signs of the correlations are correct by building similar dataframe but with slope coefficients
+
+full.list.coeff <- lapply(traits.list, function(model.list){
+  unlist(lapply(model.list, extract_slope))
+})
+
+matrix.table.c <- data.frame('MH' = full.list.coeff[[1]], 'RH' = full.list.coeff[[2]], 'SD' = full.list.coeff[[3]], 'RBT' = full.list.coeff[[4]], 'SLA' = full.list.coeff[[5]], 'LA' = full.list.coeff[[6]], 'LM' = full.list.coeff[[7]], 'FWW' = full.list.coeff[[8]], 'FM' = full.list.coeff[[9]], 'SM' = full.list.coeff[[10]], 'BOS' = full.list.coeff[[11]])
+
+neg.slopes <- matrix.table.c < 0
+sum(neg.slopes)
+
+matrix.table.r[neg.slopes] <- matrix.table.r[neg.slopes]*-1
+
+matrix.table.r <- t(matrix.table.r)
+
+matrix.r <- as.matrix(matrix.table.r)
+colnames(matrix.r) <- rownames(matrix.table.r)
+```
+
+
+## Raw Data Plots
+
+### Ellipse Table
+
+```{r}
+corrplot(matrix.r, method = "ellipse") #with pgls r-values
+
+# pdf('pgls_ellipse_table.pdf')
+# corrplot(matrix.r, method = "ellipse")
+# mtext(text = "Dependent Variable", side = 2, line = 1)
+# mtext(text = "Independent Variable", side = 3, line = 1)
+# dev.off()
+```
+
+
+
+### Network Diagram
+
+Shows the trait-relationships as a network or connected traits
+
+```{r}
+qgraph(matrix.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+Since the results for the parameters of the pgls models differ depending on which variable is considered to be the dependent and which the independent variable, when we extract the pseudo-r2 (and also the slope coefficients) each pair of traits has two sets of parameters describing their relationship. This is likely the reason for this network diagram having twice as many lines as intended with two lines for each pairwise comparison of traits instead of one.
+
+Hence, we need to choose a single model for each pairwise comparison so there are only one set of parameters and only a single line for the network diagram so it can be compared to the non-pgls diagram later. This will likely be done based on lambda value.
+
+### Lambda Matrix Plot
+
+Either way, it will be useful to be able to visualise the lambda values in order to see any patterns in them.
+
+```{r, fig.height = 8, fig.width = 10}
+# applying the extract_lambda function to a whole dataframe of models
+full.lambda.list <- lapply(traits.list, function(model.list) {
+  lambda.list <- lapply(model.list, extract_lambda)
+  lambda.list[unlist(lapply(lambda.list, is.null))] <- NA
+  unlist(lambda.list)
+})
+
+# creating the lambda matrix, reflecting it to the right way around (dependent variables as row names rather than column names), and inserting placeholder 'low' (zero) lambda values for the BOS section so when we select the ones with the 'highest' lambda it will select the correct ones in the final column and remove all the placeholder rows
+lambda.frame <- as.data.frame(full.lambda.list)
+colnames(lambda.frame) <- colnames(matrix.table.r2)
+lambda.matrix <- as.matrix(lambda.frame)
+lambda.matrix <- t(lambda.matrix)
+colnames(lambda.matrix) <- rownames(lambda.matrix)
+lambda.matrix[rownames(lambda.matrix) == 'BOS', !colnames(lambda.matrix) == 'BOS'] <- 0
+
+par(mar = c(5.1, 4.1, 4.1, 4.1))
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), fmt.cell='%.3f')
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3))
+
+
+# OR JUST USE THE CORRPLOT FUCTION WITHOUT ELLIPSES
+corrplot(lambda.matrix, method = 'color') #this is only positive so the difference between the colours isn't great and can be hard to see
+
+#now to export this figure
+pdf('../Output_figures/lambda_colour_tables.pdf')
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "Independent Variable", ylab = "Dependent Variable", main = "", axis.col = list(side = 3))
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "Independent Variable", ylab = "Dependent Variable", main = "", axis.col = list(side = 3), fmt.cell='%.3f')
+dev.off()
+```
+
+Perhaps unsurprisingly, we can see that the lambda value is more related to the dependent variable than the independent variable. This makes sense as the lambda value of the correlation comes from the residuals of the line (usually calculated in the vertical direction only) rather than absolute distance from the line.
+
+### Ligno-Only vs. Rest Boxplots
+
+```{r}
+LO.box.data <- eucs.data
+LO.box.data$LO2[LO.box.data$Sprouting_Type3 == 'Lignotuber_Only'] <- 'Lignotuber_Only_Resprouter'
+LO.box.data$LO2[!LO.box.data$Sprouting_Type3 == 'Lignotuber_Only' & !is.na(LO.box.data$LO2)] <- "Other_Strategy"
+LO.box.data$LO2 <- as.factor(LO.box.data$LO2)
+levels(LO.box.data$LO2)
+LO.box.data[LO.box.data$taxon == 'Eucalyptus cyanophylla',c('LO2')]
+
+# for convenience, here are the visually optimal scale break labels on the continuous axes for each variable:
+mh.breaks <- c(1, 3, 10, 30, 100)
+rh.breaks <- c(6, 10, 20, 30)
+sd.breaks <-c(0.51,0.55, 0.60, 0.70, 0.80)
+rbt.breaks <- c(2, 5, 10, 20, 40)
+sla.breaks <- c(2,4,8)
+la.breaks <- c(3,10,30,100)
+lm.breaks <- c(0.1, 0.3, 1, 3)
+fww.breaks <- c(0.5, 1, 2, 4)
+fm.breaks <- c(50, 500, 5000)
+sm.breaks <- c(0.5, 5, 50)
+
+
+mh.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = max_height_m, fill = LO2)) +
+  geom_point(aes(y = max_height_m, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = mh.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+
+rh.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = relative_height_by_girth, fill = LO2)) +
+  geom_point(aes(y = relative_height_by_girth, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = rh.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Height (m)", x = "")
+
+sd.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = stem_density_g_per_ml, fill = LO2)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sd.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Stem Sapwood Density (g/ml)", x = "")
+
+rbt.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = relative_bt_by_girth, fill = LO2)) +
+  geom_point(aes(y = relative_bt_by_girth, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = rbt.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Reltive Bark Thickness (mm)", x = "")
+
+sla.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = sla_mm2_per_mg, fill = LO2)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sla.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="SLA (mm2/mg)", x = "")
+
+la.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = leaf_area_cm2, fill = LO2)) +
+  geom_point(aes(y = leaf_area_cm2, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = la.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Area (cm2)", x = "")
+
+lm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = leaf_mass_g, fill = LO2)) +
+  geom_point(aes(y = leaf_mass_g, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = lm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Mass (g)", x = "")
+
+fww.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = fruit_wall_width_mm, fill = LO2)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = fww.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Wall Width (mm)", x = "")
+
+fm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = fruit_mass_mg, fill = LO2)) +
+  geom_point(aes(y = fruit_mass_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = fm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Mass (mg)", x = "")
+
+sm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = seed_mass_mg, fill = LO2)) +
+  geom_point(aes(y = seed_mass_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
+
+pdf("../Output_figures/Testing_BOS_pos.pdf", width = 21, height = 30)
+grid.arrange(mh.LO, rh.LO, sd.LO, rbt.LO, sla.LO, la.LO, lm.LO, fww.LO, fm.LO, sm.LO, nrow = 4)
+dev.off()
+```
+
+
+## Symmetrical Data Plots
+
+Making the network diagram less busy, more comparable and making the correlation coefficient matrix symmetrical for the ellipse table requires choosing which variable would be best to be the (in)dependent variable for each comparison and chosing one of the models. We decided that the it is more conservative to consider the model for which the lambda value was higher meant that more f the phylogenetic signal in both trait was being accounted for (usually when the more conserved trait was the dependent variable).
+
+
+### Halving the pgls data
+
+So now we will try to make a matrix of both lambda and r-2 such that only the arrangement of dep-indep variables with the highest lambda is included in the eventual matrix.
+
+If we can make a logical matrix or data frame such that the entries of lambda are larger than their reciprocal then maybe have a blank matrix of zeros and have the entries in the position of that logical vector be replaced by the lambda matrix entries. Then we'd have to write another function that replaces the remaining values by adding maybe the transpose of the matrix itself.
+
+Turns out there's an upper.tri(m) function for creating a logical that extracts the halves excluding the main diagonal unless diag = TRUE.
+
+```{r}
+# In order to determine which models have higher lambda than their reciprocal relationships (i.e. where the (in)dependent variables are swapped around)
+extract_highest_lambda <- function(square.matrix) { 
+  # creates a logical vector of which cells in a matrix have values that are higher than those of their reflected positions
+  logical <- matrix(NA, dim(square.matrix)[1], dim(square.matrix)[2])
+for (i in 1:dim(square.matrix)[1]){
+  for (j in 1:dim(square.matrix)[2]) {
+     logical[i,j] <- square.matrix[i,j] > square.matrix[j,i]
+  }
+}
+  if (sum(logical == t(logical), na.rm = TRUE) != 0) {
+    print("WARNING: some cells are equal to their reciprocal positions!") #delivers warning when there are some that are equal instead of having one cell value be larger or smaller than that of it its reciprocal position in the matrix
+  }
+  return(logical)
+}
+
+# now to apply this to the lambda matrix, note this matric has rows as dependent variables and cols and independent variables
+log1 <- extract_highest_lambda(lambda.matrix)
+# to check if there are places where lambda was equal for both arrangements
+sum(log1 == t(log1), na.rm = TRUE) #each pair of models with equal values when axes are swapped contributes 2 to this total, hence there is only one model like that
+log1 == t(log1) #this reveals where they are in the matrix in case there are any, they will be the 'TRUE' cells
+
+# For an example of what to do if some of them have the same lambda for both arrangements
+# ## in this case it appears that leaf mass and relative height are the trait in those 2 models and I'll decide to go with the one with leaf mass as the dependent variable
+# log1[7,2] <- TRUE #now they're all mirrored pairs nd I've assigned one of them to be the one we are going to use and the rest are either larger or smaller than one another so it's all good
+
+# Now to create or keep the matrix defining which 50% of our models it was that had the higher lambda value
+log1
+sum(!log1 != t(log1), na.rm = TRUE) # this being zero shows that this matrix is such that it's reciprocal equals its opposite (i.e. mirrored in the diagonal (i.e. transpose) equals its negative (swapped TRUE and FALSE) and we can confirm that)
+log2 <- log1
+log2[is.na(log2)] <- FALSE
+log3 <- !log1
+log3[is.na(log3)] <- FALSE
+!log2
+
+
+# now to create the symmetrical matrix using only the higher lambda value for both entries
+  ## Note the entries in this matrix are identical to what they were before adding the fire trait, except for having an additional row and column. I have verified this by renaming the loaded object from script 5 (which was still the old version as i haven't exported this new version yet) and rerun these 5 lines below and compared them.
+lambda.half <- matrix(NA, 11, 11)
+lambda.half[log2] <- lambda.matrix[log2]
+lambda.half[log3] <- t(lambda.matrix)[log3]
+rownames(lambda.half) <- rownames(lambda.matrix)
+colnames(lambda.half) <- rownames(lambda.half)
+
+# now to make the matrix of extracted r2 values symmetrical with the same method
+matrix.r2.half <- matrix(NA, 11, 11) 
+matrix.r2.half[log2] <- t(as.matrix(matrix.table.r2))[log2]
+matrix.r2.half[!log2] <- as.matrix(matrix.table.r2)[!log2] 
+rownames(matrix.r2.half) <- colnames(matrix.table.r2)
+colnames(matrix.r2.half) <- rownames(matrix.r2.half)
+
+matrix.r.half <- sqrt(matrix.r2.half)
+
+# now to assign signs to the r-values based on the sign of the coefficients
+matrix.coeff.half <- matrix(NA, 11, 11)
+matrix.coeff.half[log2] <- t(as.matrix(matrix.table.c))[log2]
+matrix.coeff.half[!log2] <- as.matrix(matrix.table.c)[!log2] 
+rownames(matrix.coeff.half) <- colnames(matrix.table.c)
+colnames(matrix.coeff.half) <- rownames(matrix.coeff.half)
+
+neg.slopes.half <- matrix.coeff.half < 0
+
+matrix.r.half[neg.slopes.half] <- matrix.r.half[neg.slopes.half]*-1
+```
+
+### New Lambda Matrix
+
+```{r, fig.height = 8, fig.width = 10}
+# new matrix
+plot(lambda.half, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), asp = TRUE)
+# plot(lambda.half, col = heat.colors(10, rev = TRUE), breaks = c(0.400, 0.450, 0.500, 0.550, 0.600, 0.650, 0.700, 0.750, 0.800, 0.850, 0.900), na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), asp = TRUE)
+#corrplot(as.matrix(delta.r2.half), method = 'color')
+
+#compare with raw lambda matrix:
+plot(lambda.matrix, col = heat.colors(30, rev = TRUE), breaks = 30, na.col= "black", key = list(side = 1, cex.axis = 1.00), fmt.key="%.3f", xlab = "", ylab = "", main = "", axis.col = list(side = 3), asp = TRUE)
+#corrplot(as.matrix(delta.r2), method = 'color')
+```
+
+
+### Subsetting Network Diagrams
+
+```{r}
+#so for the new comparison for the network diagrams
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(matrix.r, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+#qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE) #table matrix comes from the olm models and so is already symmetrical in its R and R-squared values
+
+
+# TO EXPORT:
+
+network.diagram.pgls.half <- qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+# network.diagram.olm <- qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(network.diagram.pgls.half, filetype = 'pdf', filename = "../Output_figures/pgls_network_full", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+#qgraph(network.diagram.olm, filetype = 'pdf', filename = "olm_network", height = 15, width = 20, labels = colnames(table.matrix), label.cex = 2)
+```
+
+
+#### Only Significant Relations
+
+The above network diagram is still too busy so only showing the relationships that are statistically significant will further reduce the visual complexity.
+
+##### Reformatting the data
+
+```{r fig.height = 8, fig.width = 10}
+#need to find a function that extracts P-values from each model
+pgls.P <- lapply(traits.list, function(model.list){
+  unlist(lapply(model.list, extract_P))
+})
+class(mh.list)
+extract_P(perfect.fit)
+pgls.P <- as.data.frame(pgls.P)
+colnames(pgls.P) <- colnames(matrix.r)
+row.names(pgls.P) <- colnames(pgls.P)
+pgls.P <- t(pgls.P) #now it's around the right way with the row indicating the dependent variable and colun the independent variable
+pgls.P 
+
+# the following tests if small differences in computed values in mirrored positions in the matrix are due to the different ways that functions treat values or actually represent an actual difference (i.e. is the matrix actually symmetrical as we would expect it to remain when we swap the axes, lambda is often not equal so that tends to skew things)
+## not simply computationally different so not symmetrical at all -> hence we need to select which half we are going to use
+all.equal(pgls.P, t(pgls.P)) 
+
+# selecting which 50% of the p-value matrix we are going to be using
+pgls.P.half <- matrix(NA, 11, 11) 
+pgls.P.half[log2] <- as.matrix(pgls.P)[log2]
+pgls.P.half[!log2] <- t(as.matrix(pgls.P))[!log2] 
+rownames(pgls.P.half) <- colnames(matrix.r)
+colnames(pgls.P.half) <- rownames(pgls.P.half)
+pgls.P.half
+
+# First to determine which entries in the matrices are significant (to be used in places where I'm not using the symmetrical tables)
+sig.models <- pgls.P < 0.05 # non-symmetrical
+
+# Note from the past: when grampians SD are excluded, the SD ~ MH becomes non significant and the SD ~ LA and LA ~ SD relationships become significant
+
+# NWe have applies the is-significant assignment before we have made the matrix symmetrical here in case we want to have a look at the non-symmetrical version at some point. It's possible to assign significance afterward as well though
+row.names(sig.models) <- colnames(sig.models)
+sig.models <- sig.models == 1
+sig.netlines <- t(matrix.table.r2) #since matrix.table.r2 is the wrong way around
+sig.netlines[!sig.models] <- 0 # now sig.netlines is around the right way
+
+#now to repeat the symmetry-inducing model-choosing as above
+sig.only.r2.half <- matrix(NA, 11, 11)
+sig.only.r2.half[log2] <- as.matrix(sig.netlines)[log2]
+sig.only.r2.half[!log2] <- t(as.matrix(sig.netlines))[!log2]
+rownames(sig.only.r2.half) <- rownames(sig.netlines)
+colnames(sig.only.r2.half) <- rownames(sig.netlines)
+
+sig.only.r.half <- sqrt(sig.only.r2.half)
+sig.only.r.half[neg.slopes.half] <- sig.only.r.half[neg.slopes.half]*-1
+```
+
+
+Comparing the sig-only version of the network diagram to the previous that contained all the lines:
+
+```{r}
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+```
+Saving/Exporting the figures:
+
+```{r}
+network.diag.pgls.sig <- qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+qgraph(network.diag.pgls.sig, filetype = 'pdf', filename = "../Output_figures/pgls_network_sig_only", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+```
+
+
+#### Final Network Diagrams
+
+```{r}
+#qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+#qgraph(table.matrix, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+#network.diag.olm.sig <- qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+#network.diag.pgls.sig <- qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+#qgraph(sig.only.r.olm, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+#qgraph(network.diag.pgls.sig, filetype = 'pdf', filename = "pgls_network_sig_only", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+#qgraph(network.diag.olm.sig, filetype = 'pdf', filename = "olm_network_sig_only", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+```
+
+##### Threshold and Minimum Values
+
+
+###### Only r > 0.2
+
+```{r}
+sig.only.r.half2 <- sig.only.r.half
+sig.only.r.half2[abs(sig.only.r.half2) < 0.2] <- 0 #6 entries => 3 relationships lost to
+
+qgraph(sig.only.r.half2, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+
+#showing that what I'd been doing manually can be done automatically by an argument of the qgraph function
+qgraph(sig.only.r.half2, layout = 'spring', label.cex = 0.9, label.scale = FALSE)
+qgraph(sig.only.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, threshold = 0.2)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, threshold = 0.2)
+```
+
+###### Only r > 0.3
+
+From now on we will use the colorblind palette for the following networks, which replaces the green positive correlation lines with blue lines. the red is still representative of negative correlations.
+
+
+```{r}
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, threshold = 0.3, theme = 'colorblind')
+#qgraph(network.diag.pgls.0.3.col, filetype = 'pdf', filename = "../Output_figures/pgls_network_threshold_r>0.3", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+
+# # in case we need to jitter nodes around
+# network.diag.pgls.0.3.col <- qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, threshold = 0.3, theme = 'colorblind')
+# network.diag.pgls.0.3.col$layout[5,1] <- 0.08
+# network.diag.pgls.0.3.col$layout[4,1] <- 0.97
+# network.diag.pgls.0.3.col$layout[3,1] <- 0.87
+```
+
+No apparent need for a jitter.
+
+
+###### Minimum Values
+
+```{r}
+# looking at what the minimum argument does
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.3)
+
+# minimum vs. threshold
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', threshold = 0.3)
+qgraph(matrix.r.half, layout = 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', minimum = 0.30)
+```
+
+
+###### Thinning of Busy Edges
+
+We want to make the relationships that had |r| < 0.30 invisible but we don't want the node positions to move as if theses relationships had never existed. I.e. we want to make some edges invisible but without changing node positions and without changing the edge widths of the remaining edges.
+
+```{r}
+# need to know which relationships we want to keep first
+## note cannot regerate the effective version of the r-matrix used if the subsetting was done as part of function arguments 'threshold' or 'minimum' rather than pre-making the altered r-matrix accordingly
+qgraph(matrix.r.half, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind', threshold = 0.30)
+matrix.r3 <- matrix.r.half
+matrix.r3[abs(matrix.r3) < 0.3] <- 0
+
+# now to use above info as visual guide for which nodes should have lines between them
+## note that nodes are numbered in order they appear as columns in the r-matrix
+network.edge.rem <- qgraph(matrix.r.half, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+network.edge.rem$Edgelist$weight[abs(network.edge.rem$Edgelist$weight) <0.3] <- 0
+plot(network.edge.rem)
+qgraph(matrix.r.half, layout= 'spring', label.cex = 0.9, label.scale = FALSE, theme = 'colorblind')
+```
+
+To Export this final version of it:
+
+```{r}
+#qgraph(network.edge.rem, filetype = 'pdf', filename = "../Output_figures/pgls_network_final_r>3", height = 15, width = 20, labels = colnames(matrix.r.half), label.cex = 2)
+network.edge.rem$graphAttributes$Nodes$label.cex <- 2
+pdf("../Output_figures/pgls_network_final_r>3.pdf", height = 15, width = 20)
+plot(network.edge.rem)
+dev.off()
+
+```
+
+
+
+### Supp. Mat. Tables of Full Coeff.
+
+```{r}
+# extract standard error of slope coeff for each model
+## note the following has dependent variables as cols not rows
+coeff.SE <- lapply(traits.list, function(model.list){
+  unlist(lapply(model.list, extract_SE))
+})
+coeff.SE <- as.data.frame(coeff.SE)
+colnames(coeff.SE) <- colnames(matrix.r)
+row.names(coeff.SE) <- colnames(coeff.SE)
+coeff.SE <- t(coeff.SE) 
+
+# extract the degrees of freedom for each model, note dependent vars are cols here
+pgls.n <- lapply(traits.list, function(model.list){
+  unlist(lapply(model.list, extract_n))
+})
+pgls.n <- as.data.frame(pgls.n)
+colnames(pgls.n) <- colnames(matrix.r)
+row.names(pgls.n) <- colnames(pgls.n)
+pgls.df <- pgls.n
+pgls.n <- pgls.df + 2
+
+# the following will be formatted such that DV1_1, DV1_2, etc will be the order so when we use 'unlist()' we need the matrices to have dependent vars as cols (i.e. transpose matrices which have been the 'right' way around and leave the rest)
+pgls.combined.param1 <- data.frame('Lambda' = unlist(as.data.frame(t(lambda.matrix))), 'Slope' = paste(unlist(as.data.frame(matrix.table.c)), unlist(as.data.frame(coeff.SE)), sep = " ± "), 'R_Squared' = unlist(as.data.frame(matrix.table.r2)), 'N' = unlist(as.data.frame(pgls.n)), 'P_value' = unlist(as.data.frame(t(pgls.P))))
+ind.var <- data.frame('I.V.' = rep(c('MH', 'RH', 'SD', 'RBT', 'SLA', 'LA', 'LM', 'FWW', 'FM', 'SM', 'BOS'), times = 11))
+pgls.combined.param1 <- cbind(ind.var, pgls.combined.param1)
+```
+
+This is fine but we need to find a way to round the extracted values down to a more reasonable number of decimal places. Let's try 3. 
+
+Also, when transcribed to csv there appears a weird hyphen symbol '¬' before the '±' in each slope entry. Since it is an uncommon symbol and appears nowhere else in the manuscript document, it is relatively easy to deal with using the replace all or delete all function.
+
+#### Fixing Rounding
+
+```{r}
+# already loaded this object but I'll rename to preserve original
+df <- pgls.combined.param1
+df[, 'D.V.'] <- row.names(df)
+
+# create a three colmn data frame with each component of the 'slope' sep by the space character
+sep_slope <- data.frame(do.call('rbind', strsplit(as.character(df$Slope),
+                                                  ' ', fixed = TRUE)))
+# apply the num_round function to cols 1 and 3 but not 2
+sep_slope <- data.frame(sep_slope[2], apply(sep_slope[c(1,3)],2,num_round))
+
+# paste them back together after rounding
+sep_slope$Slope <- paste(sep_slope$X1, sep_slope$X2, sep_slope$X3)
+
+#final object binds the two character columns, the new slope and rounds the remaining that need it
+df2 <- cbind(df[, c('D.V.', 'I.V.')],
+             Lambda = num_round(df$Lambda), 
+             Slope = sep_slope$Slope,
+             R_squared = num_round(df$R_Squared),
+             N = df$N,
+             P_value = num_round(df$P_value))
+
+pgls.combined.param2 <- df2
+
+write.csv(pgls.combined.param2, file = "../Output_figures/PGLS_full_coefficients.csv", row.names = FALSE)
+```
+
+
+# Exporting Objects for Comparison with OLS Analysis
+
+```{r}
+# pgls raw 'correlation' matrix
+save(matrix.r, file = "../Input_data/matrix_r.RData")
+# pgls symmetrical 'correlation' matrix
+save(matrix.r.half, file = "../Input_data/matrix_r_half.RData")
+save(sig.only.r.half, file = "../Input_data/sig_only_r_half.RData")
+# final network object
+save(network.edge.rem, file = "../Input_data/network_r3_obj.RData")
+# matrix of lambda values for later testing relationship between difference in r2 value between the two analyses against lambda value
+save(lambda.matrix, file = "../Input_data/lambda_matrix.RData")
+# symmetrical lambda.matrix
+save(lambda.half, file = "../Input_data/lambda_matrix_half.RData")
+# matrix of coefficients
+save(matrix.table.c, file = "../Input_data/pgls_coeff_matrix.RData")
+# symmetrical matrix of coefficients
+save(matrix.coeff.half, file = "../Input_data/pgls_coeff_matrix_half.RData")
+# raw matrix of model significance
+save(sig.models, file = "../Input_data/pgls_sig_models.RData")
+# symmetry-halving logical
+save(log2, file = "../Input_data/halving_logical.RData")
+
+# following are for the multiple comparisons, RDS format better preserves object structure
+saveRDS(pgls.combined.param1, file = "../Input_data/PGLS_coefficients_full.rds")
+saveRDS(pgls.P, file = "../Input_data/PGLS_P.rds")
+```
+
+
