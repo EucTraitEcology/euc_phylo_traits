@@ -5,7 +5,7 @@ output: html_notebook
 
 # Introduction
 
-This Notebook serves to prepare the tree to be used in this analysis and run and visualise the output of the phylogenetic signal analysis.
+This notebook serves to help prepare the tree to be used in this analysis and run and visualise the output of the phylogenetic signal analysis. Hence, this notebook creates Figure 3 in the manuscript and supplementary Table S3.1.
 
 The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
 
@@ -163,19 +163,20 @@ summary(lambda.sms)
 # Dot-Plot of Lambda values
 
 ```{r}
-#First to creat a dataframe of lambda values of each model corresponding to each trait
+# First to create a data frame of lambda values of each model corresponding to each trait
 lambda.full <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh$param.CI$lambda$opt, lambda.rh$param.CI$lambda$opt, lambda.std$param.CI$lambda$opt, lambda.rbt$param.CI$lambda$opt, lambda.sla$param.CI$lambda$opt, lambda.lfa$param.CI$lambda$opt, lambda.lms$param.CI$lambda$opt, lambda.fms$param.CI$lambda$opt, lambda.fwl$param.CI$lambda$opt, lambda.sms$param.CI$lambda$opt))
 
+# Extract the bound of the confidence interval around the lambda value each time
 ci.val <- c(lambda.mh$param.CI$lambda$ci.val, lambda.rh$param.CI$lambda$ci.val, lambda.std$param.CI$lambda$ci.val, lambda.rbt$param.CI$lambda$ci.val, lambda.sla$param.CI$lambda$ci.val, lambda.lfa$param.CI$lambda$ci.val, lambda.lms$param.CI$lambda$ci.val, lambda.fms$param.CI$lambda$ci.val, lambda.fwl$param.CI$lambda$ci.val, lambda.sms$param.CI$lambda$ci.val)
 
-# divides the bounds of the 95% CI into two seperate objects, one for the lower bounds and another for the upper bound
+# divides the bounds of the 95% CI into two separate objects, one for the lower bounds and another for the upper bound using custom function
 bounds <- divide_ci(ci.val)
 
-# now to create 
+# now to create full data frame
 lambda.full <- cbind(lambda.full, bounds)
 ## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
 lambda.full[lambda.full$Traits == "Relative Height", c("lower_CI")] <- 0 
-## having an extra column to compare ranges
+## having an extra column to compare ranges/widths of confidence intervals
 lambda.full$range_CI <- lambda.full$upper_CI - lambda.full$lower_CI
 # export this table so it can be used to add things to suppmat tables comparing the lambda values and ranges of values for potential trees to the value and range found for this final tree
 write.csv(lambda.full, file = "../Output_figures/final_tree_lambdas.csv")
@@ -191,6 +192,6 @@ scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upp
 ggsave(lambda.dot.plot, file = "../Output_figures/lambda_values_dotplot.pdf", width = 15, height = 10)
 ```
 
-All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass had a value significantly different from zero, but it was very low. The rest had moderate to high values of lambda.
+All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass and Relative Bark Thickness had values significantly different from zero, but it was very low. The rest had moderate to high values of lambda.
 
-Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon. Perhaps analysis of variance might help with figuring this out??
+Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon.

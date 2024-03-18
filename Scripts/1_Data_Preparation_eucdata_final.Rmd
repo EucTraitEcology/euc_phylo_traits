@@ -1,14 +1,21 @@
 ---
-title: "Data Preparation Using Eucdata"
+title: "Data Preparation"
 output:
   html_document:
     df_print: paged
 ---
 
+# Introduction
 
-This new dataprep version uses the trait_medians object (long-format data) from the eucdata package which automatically removes the grampians SD from the combined_traits object from which those traits are calculated. The allometric traits of Relative Height and Relative Bark Thickness recalculated according to a more accurate model as of November 2020, same as the previous version. The medians here were calculated after data from each of the four datasets were pooled rather than the the previous method (which also used the datasets from the eucdata package instead) where the medians were taken first by dataset and then by taxon for those taxa that occured in more than a single dataset. The max. height data also came from taking the median of all the subspecies where it was not specifies unless otherwise stated. 
-    -I need to re-check so of the subspecies that were originally manually assigned and keep my        assignment for those where I'm sure (based on distribution etc.) that my previously              manually assigned value is more correct.
+The following script consolidates the data collected across multiple collecting campaigns, along with maximum height and fire response data from other databases, and performs all necessary transformations to prepare data for analysis in subsequent scripts. This script also maps collecting locations for all samples and produces Figure 1 (map if collecting locations) and supplementary Figure S2 (comparison of trait values for each of the 4 post-fire regeneration strategies).
 
+The data are spread across four datasets: South East, Mallee, Grampians, and Stirling. These raw data are represented by the `combined_traits` object in the Input folder. These data have also been published in AusTraits.
+
+The medians per individual tree and then by species were calculated from this combined dataset and median maximum heights (from Euclid 2006) added to create the `trait_medians` object. See supplementary Table S1 in manuscript for taxa whose maximum height had to be inferred rather than simply extracted from this Euclid database. 
+
+This version of this script uses the trait_medians object (wide-format data) from the eucdata package which automatically removes the grampians SD from the `combined_traits` object from which those traits are calculated. The allometric traits of 'Relative Height' and 'Relative Bark Thickness' (both relative to girth) were recalculated according to a more accurate model as of November 2020. The medians here were calculated after data from each of the four datasets were pooled rather than the previous method (where the medians were taken first by dataset and then by taxon for those taxa that occured in more than a single dataset). The max. height data also came from taking the median of all the subspecies where subspecies was not specified, unless otherwise stated (see supplementary Table S1 of manuscript).
+
+Note: Prior to running the following code, make sure there is an adjacent  folder to the Scripts folder (in which this Notebook lies) called 'Input_data' and contains the following objects: 'combined_traits.rda' and 'trait_medians.rda'
 
 ## All Required Packages and Functions
 
@@ -21,7 +28,7 @@ This new dataprep version uses the trait_medians object (long-format data) from 
 
 
 # library(devtools) # only needed for installing the eucdata package
-library(eucdata) # New data repository
+# library (eucdata) # New data repository
 library(dplyr)
 library(readxl) # to input data from csv, especially taxon name-status checking
 library(ggplot2) # for plots checking traits of E. sieberi and assumption it can be included in the combination resprouter category
@@ -33,21 +40,20 @@ library(viridis) # required for colours on map of collecting locations
 
 
 
-## Data Preparation
-
-
 ```{r}
 # extra chunk until we can get eucdata package to download
-load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/combined_traits.rda")
-load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/trait_medians.rda")
-load("~/Dropbox/Eucs_phylo_traits/Input_data/New_data/euclid.rda")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/combined_traits.rda")
+load("~/Dropbox/Eucs_phylo_traits/Input_data/trait_medians.rda")
 ```
+
+
+## Data Preparation
 
 ```{r}
 # this is the long-form row-bound pooled data from all datasets with the grampians SD data removed
 trait.data.full <- combined_traits 
 
-# this is the calculated medians from the eucdata package with the max height added from the EUCLID database and all 170 taxa with measured data and all traits for which there is any data even if only in a sigle dataset
+# this is the calculated medians from the eucdata package with the max height added from the EUCLID database and all 170 taxa with measured data and all traits for which there is any data even if only in a single dataset
 trait.medians <- trait_medians 
 
 #to record what species there is data for in each of the 4 datasets that were pooled together
@@ -73,7 +79,7 @@ names(datasets2) <- c('taxon', 'dataset2')
 ```
 
 
-All but three remaining taxa in the dataset are not considered current according to APC (2021), but we use the superceded names for inernal consistency throughout this document:
+All but three remaining taxa in the dataset are not considered current according to APC (2021), but we use the superceded names for internal consistency throughout this document:
 E. costata subsp. murrayana (now known as E. incrassata)
 E. cinerea subsp. victoriensis (now known as E. cinerea subsp. triplex)
 E. decipiens subsp. chalara (intergrade between E. decipiens and E. adesmophloia)
@@ -81,7 +87,7 @@ E. decipiens subsp. chalara (intergrade between E. decipiens and E. adesmophloia
 
 ### Completing the Max Height data for each taxon:
 
-Here we use the Euclid dataset extracted from 2006 (Slee et al. 2006). Some of the mallee species are not in the euclid list bc their status as a species is not well supported and they are controversial. 
+Here we use the Euclid dataset extracted from the 2006 datbase (Slee et al. 2006). Some of the mallee species are not in the euclid list because their status as a species is not well supported and/or controversial. 
 
 The five taxa now with missing values for max height are:
 E. costata subsp. murrayana (obsolete name) -> 8m (height of E. incrassata to which this taxon is now considered to belong)
@@ -90,7 +96,9 @@ E. silvestris: 7m (that of E. odorata to which this taxon now belongs)
 E. wimmerensis: 8m (that of the taxa this species is poorly resolved from and for which height data is available) 
 Lophostemon confertus -> 40m according to Rob Kooyman (AusTraits Database) as this taxon is not in the genus Eucalyptus
 
-Note: in previous versions of this script, the dataset was such that there were an additional 4 taxa for which height was inferred manually as the axa were not resolved completely down to subspecies but it could be inferred from comparing the collecting location to the distribution map of each subspecies. Since the dataset has become more resolved, those taxa have been changed to the same taxa that were inferred from distribution anyway.
+The above 5 taxa and explanations for max height allocation are also presented in the supplementary materials of the paper.
+
+Note: in previous versions of this script, the dataset was such that there were an additional 4 taxa for which height was inferred manually. This was because the taxa were not resolved completely down to subspecies, but max height could be inferred from comparing the collecting location to the distribution map of each subspecies. Since the dataset has become more resolved, those taxa have been changed to the same taxa that were inferred from distribution anyway. Hence why there are only 5 now wheen there had been 9 in earlier versions.
 
 ```{r}
 # adding max heights that were missing entirely from the euclid heights column in trait.medians
@@ -136,17 +144,30 @@ eucs.data.prel <- eucs.data.prel[, c("taxon", "dataset", "dataset2", "max_height
 
 The following fire response data was sourced from Nicolle (2006). Only a single taxon included in the phylogeny is a stem sprouter (Eucalyptus sieberi), the fire responses exhibited by the remaining taxa are either obligate seeding, resprouting from a lignotuber, or capable of resprouting from both a lignotuber and epicormic buds in the stems (combination sprouters).
 
+
 Furthermore, some regeneration strategies needed to be inferred as Nicolle (2006) uses the older Brooker (2000) taxonomy, which did not include all taxa included in our dataset. Ultimately, the strategies of some taxa could not be determined and remain as missing data.
+
 E. falciformis was inferred to be equivalent to Brooker's E. willisi and was assigned a strategy as such.
+
 E. sabulosa inferred to have same strategy as Brooker's E. aromaphloia based on Nicolle (2019) noting E. aromaphloia subsp. sabulosa being a synonym of E. sabulosa.
+
 E. bunyip, being an intergrade between E. camphora and E. strzeleckii which are both combination sprouters, was inferred to share the same strategy.
+
 E. beyeriana inferred to be synonym of E. beyeri according to Nicolle (2019) and hence assigned the same strategy.
+
 E. carolaniae, being an intergrade between E. cypellocarpa and E. goniocalyx which are both combination sprouters, was similarly assigned.
+
 Lophostemon confertus was inferred to be a lignotuber resprouter based on Clarke et al. (2013) considering it to be a sprouter and Guinto et al. (1999) mentioning that its epicormic strands are killed by relatively low intensity fires. Hence it is effectively incapable of epicormic post-fire regeneration.
+
 E. alaticaulis, was inferred to be a combination resprouter as all but two unknown members of its series (according to Brooker 2000) were such. The two unknown species were also the same two that later treatments considered to belong in their own seperate series.
+
 Subspecies were mostly noted to have the same strategies with rare exception, only one such taxon was included in our dataset and without its sister subspecies to compare: E. loxophleba subsp. loxophleba.
+
 E. arenicola is a relatively newly defined species and so its regeneration strategy could not determined.
-Similarly, with the outgroup species, Syncarpia glomulifera and Tristaniopsis laurina, we could not get info on their post-fire regeneration.
+
+Similarly, with the outgroup species, Syncarpia glomulifera and 
+Tristaniopsis laurina, we could not get info on their post-fire regeneration.
+
 E. victoriana, E. fastigata, E. pilularis and E. nitens were all listed as unknown regarding sprouting type within Nicolle (2006).
 
 Upon further investigation, E. sieberi has been observed to be able to basally resprout when young (from Gill and Moore 'Tree Damage' chapter on Fire damage in Cheney et al.s 1992 'A prescribed burning guide for young regrowth forests of silvertop ash') and somewhat basally resprout in gippsland (Ezra's Master's Thesis). Hence, we've re-assigned it to be in the Variably Sprouting category rather than just as a stem sprouter as Nicolle (2006) noted.
@@ -304,7 +325,7 @@ leaf area
 leaf mass
 NO BARK and NO REPRODUCTIVE TRAITS!
 
-Also, Tristaniopsis laurina data came from a single individual that was not particularly representative of the taxon (small and young), so we have subsequently decided to go with using Syncarpia and Lophostemon as outgroups.
+Also, Tristaniopsis laurina data came from a single individual that was not particularly representative of the taxon (small and young), so we have subsequently decided to go with using Syncarpia and Lophostemon as the outgroups.
 
 ```{r}
 trist.data <- trait.data.full[trait.data.full$taxon == 'Tristaniopsis laurina',]
@@ -328,7 +349,7 @@ write.csv(all.taxa.final, file = "../Input_data/all_taxa_final.csv")
 ### Final Datasets
 
 ```{r}
-# this pgls method being used in this analysis requires a taxon column rather than taxa in rownames
+# the pgls method being used in this analysis requires a taxon column rather than taxa in rownames
 eucs.data <- data.frame(eucs.data.prel) 
 cat.cols <- c("taxon", "dataset", "dataset2", "Sprouter", "Stem_Sprouter", "Lignotuber_Sprouter", "Stem_Sprouter2", "Lignotuber_Only", "Sprouting_Type", "Sprouting_Type2", "Sprouting_Type3", "Sprouting_Type4", "Sieberi", "LO2")
 eucs.log.data <- eucs.data
@@ -340,25 +361,15 @@ eucs.scaled.data[, !names(eucs.scaled.data) %in% cat.cols] <- lapply(eucs.scaled
 write.csv(eucs.data, file = "../Input_data/eucs_data.csv")
 write.csv(eucs.log.data, file = "../Input_data/eucs_log_data.csv")
 write.csv(eucs.scaled.data, file = "../Input_data/eucs_scaled_data.csv")
-
-# # just testing if applying the scale() function to LO2 gives the same answer when applied to 0-1 scaling and 0-2 scaling
-#   ## yes, it does
-# 
-# scale(eucs.scaled.data$LO2)
-# LO2.alt <- eucs.scaled.data$LO2
-# LO2.alt[LO2.alt == 2 & !is.na(LO2.alt)] <- 1
-# all.equal(scale(eucs.scaled.data$LO2), scale(LO2.alt))
-# test <- data.frame('scaled_0_2' = scale(eucs.scaled.data$LO2), 'scaled_0_1' = scale(LO2.alt))
-# sd(LO2.alt, na.rm = TRUE) # 0.43713
-# sd(eucs.scaled.data$LO2, na.rm = TRUE)# 0.87426
 ```
 
-Our final datasets generated above include all the taxa that will be used in subsequent analysis but also an additional 5 taxa for which trait data is available but insufficient phylogenetic data could be found to include them on the tree. Hence, they were also excluded from the non-phylogenetic analysis for consistency, though they are included in the explorations below (including our map pdf)
+
+Our final datasets generated above include all the taxa that will be used in subsequent analysis but also an additional 5 taxa for which trait data is available but insufficient phylogenetic data could be found to include them on the tree. Hence, they were also excluded from the non-phylogenetic analysis for consistency, though they are included in the explorations below (including our map pdf).
 
 
-# Testing Stem Sprouter Position
+## Testing Stem Sprouter Position
 
-Here we see where in the dataset stem sprouters fall in order to decide if they're worth differentiating from other categories or can be absorbed into the combination resprouters or something, since there's only 4 of them. We're using similar code to the next section where we compared E. sieberi back when it was the only stem-only resprouter that we had. Now we have 4 of them, but E. sieberi is no longer one of them as new evidence suggests it can resprout from a lignotuber when stem diameter is up to ~10cm.
+Here we see where in the dataset stem sprouters fall in order to decide if they're worth differentiating from other categories or can be absorbed into the combination resprouters or something, since there's only 4 of them. We're using similar code to the next section where we compared E. sieberi back when it was the only stem-only resprouter that we had (before we included other databases and sources to fill in the gaps in knowledge of fire responses of taxa). Now we have 4 of them, but E. sieberi is no longer one of them as new evidence suggests it can resprout from a lignotuber when stem diameter is up to ~10cm.
 
 
 ```{r}
@@ -526,18 +537,23 @@ stemsp.sm <- ggplot(data = stem.sprout.position.data,
                               "Obligate_Seeder"="#F8E125FF")) + scale_x_discrete(limits = c("Combination_Sprouter", "Stem_Only", "Obligate_Seeder", "Lignotuber_Only"), labels = c("Combination\nResprouter", "Stem-Only\nResprouter", "Obligate\nSeeder", "Basal-Only\nResprouter")) + scale_y_continuous(trans = "log10", breaks = c(0.5, 5, 50)) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
 panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
 
-
+ # creating a pdf of all 10 boxplots we just created
 pdf("../Output_figures/Testing_Stem_pos.pdf", width = 21, height = 30)
 grid.arrange(stemsp.mh, stemsp.rh, stemsp.sd, stemsp.rbt, stemsp.sla, stemsp.la, stemsp.lm, stemsp.fww, stemsp.fm, stemsp.sm, nrow = 4)
 dev.off()
 
+## if that pdf looks fine, the following removes the objects we just created from the environment now that they are uneccessary going forward (especially if all scripts will be run without clearing the environment between)
+rm('stemsp.mh', 'stemsp.rh', 'stemsp.sd', 'stemsp.rbt', 'stemsp.sla', 'stemsp.la', 'stemsp.lm', 'stemsp.fww', 'stemsp.fm', 'stemsp.sm')
 ```
 
 
 
-# Testing Sieberi Position
+## Testing Sieberi Position
 
-Since, we have included E. sieberi, the only stem-only resprouter in the dataset, in with the combination resprouters, we want to check how valid of an assumption that is based on where its trait values tend to fall. I want to know where in the distributions of combo sprouters it lies to see if it is an outlier w.r.t. any of the categories.
+The following is a depreciated section testing the position of E. sieberi when it was believed to be the only stem resprouter in the dataset:
+
+
+Since we have included E. sieberi, the only stem-only resprouter in the dataset, in with the combination resprouters, we want to check how valid of an assumption that is based on where its trait values tend to fall. I want to know where in the distributions of combo sprouters it lies to see if it is an outlier w.r.t. any of the categories.
 
 ```{r}
 # first to add an additional category to the data to delineate E. sieberi and call it a stem sprouter
@@ -711,25 +727,31 @@ panel.background = element_blank(), axis.line = element_line(colour = "black"), 
 pdf("../Output_figures/sieberi_position.pdf", width = 21, height = 30)
 grid.arrange(sieberi.mh, sieberi.rh, sieberi.sd, sieberi.rbt, sieberi.sla, sieberi.la, sieberi.lm, sieberi.fww, sieberi.fm, sieberi.sm, nrow = 4)
 dev.off()
+
+
+## if that pdf looks fine, the following removes the objects we just created from the environment now that they are uneccessary going forward (especially if all scripts will be run without clearing the environment between)
+rm('sieberi.mh', 'sieberi.rh', 'sieberi.sd', 'sieberi.rbt', 'sieberi.sla', 'sieberi.la', 'sieberi.lm', 'sieberi.fww', 'sieberi.fm', 'sieberi.sm')
 ```
 
 
-# Sampling Map
+## Sampling Map
 
 ```{r}
-# plainest black
+# plainest black theme; sizes best for viewing within the Notebook output unner this code chunk
 ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
     aes(longitude, latitude),
     trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 0.9, alpha = 0.5, color = 'black', pch = 17) +
   xlab("Longitude") +
   ylab("Latitude")
 
+# the same theme with sizes adjusted for best viewing as exported pdf
 pdf('../Output_figures/map_of_collecting_locations.pdf')
 ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
     aes(longitude, latitude),
     trait.data.full[trait.data.full$taxon %in% eucs.data$taxon,], size = 2, alpha = 0.5, color = 'black', pch = 17)
 dev.off()
 
+# the same theme with sizes adjusted for best viewing as exported png
 png('../Output_figures/map_of_collecting_locations.png')
 ggplot() + theme_void() + geom_sf(data = ozmap_states, fill = 'white', lwd = 0.1) + coord_sf(xlim = c(114, 153), ylim = c(-43,-10)) + geom_point(
     aes(longitude, latitude),

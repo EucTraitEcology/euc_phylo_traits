@@ -5,13 +5,13 @@ output: html_notebook
 
 # Introduction
 
-This Notebook serves to prepare each candidate tree and run and visualise the output of the phylogenetic signal analysis so that differences in those outputs can be compared. Upon selection of a final tree to be used in the main and subsequent analyses, this notebook calculates and visualises the output for the phylogenetic analysis for that tree.
+This notebook serves to prepare each of the 15-17 possible candidate trees created in notebook 2 (section 'Testing Placement Effects') and run and visualise the output of the phylogenetic signal analysis (i.e. calculation of Pagel's Lambda) so that differences in those outputs can be compared. Upon selection of a final tree to be used in the main and subsequent analyses, this notebook combines the output of Lambda value calculation of this final tree with that of all the possible candidate trees (created by notebook/script 3) in a data frame subsequently used for supplementary Table S3.1 of the manuscript.
 
 The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
 
 ## How to use this script
 
-The script acts like one large single function to be rerun for each potential phylogeny. Each time the sections down to the end of 'Dot-Plot of Lambda values' is run choose a different number to put in line 69 to select a particular tree from that list of 15 and simply change the name of the output figure (line 194) and the final object lambda.full (line 187) to generate and store the result for each tree run to match the tree selected for that run. Rerun for each tree in the list of potential trees being tested.
+A large part of this script acts like one large single function to be rerun for each potential phylogeny. Each time the sections down to the end of 'Dot-Plot of Lambda values' are run (until line 203), the following lines must be changed: (1) choose a different number to put in line 77 to select a different tree from that list of 15 potential trees; (2) change the name of the output figure (line 202) to match the number of the tree in that list so a new plot will be created and not overwrite the previous one; and (3) change the number at the end of the final object named `lambda.full` (but only the instance where it appears in line 195) to the corresponding object name with that number (all are listed in line 217). Rerunning this process for each tree in the list generates and stores the result for each tree run as an object in the environment. This can then be subsequently combined into a data frame (lines 211-237) before being later added to outputs from other scripts (run in the order specified in the README document for this project) to create a combined data frame for exporting (lines 655-end). Lines 240-649 define a section in the middle of this script where the effects of differences between trees on the SLA-LA and MH-SD trait correlation strength are tested and can be observed within this notebook, though no output is exported from this section.
 
 # Analysis
 
@@ -29,7 +29,7 @@ library(dplyr)
 
 # functions
 
-## shortcut fot plotting trees (of the relevant size for this analysis) with the right dimensions to be easily inspected in the output within the this markdown document
+## shortcut fot plotting trees (of the relevant size for this analysis) with the right dimensions to be easily inspected in the output within this markdown document
 plot_dim1 <- function(phy) {
   # plots with the correct size text and alignment for 158-225 taxa trees like will be used
   plot(ggtree(phy) +xlim(0, 35) + geom_tiplab(size=5)) 
@@ -72,7 +72,7 @@ eucs.scaled.data <- read.csv("../Input_data/eucs_scaled_data.csv")
 ```{r fig.height = 30, fig.width = 15}
 # Each subsequent candidate input tree will be named eucs.test.tree, each tree is known to be rooted in advance
 ## first to read in the list object of all the newick forms of the 15 potential trees
-pot.tree.list <- readRDS("../Input_data/Potential_trees_nwk_list.RData")
+pot.tree.list <- readRDS("../Intermediate_Tree_Building_Products/Potential_trees_nwk_list.RData")
 ## picking which potential tree we're going to use for this run
 tree <- read.tree(text = pot.tree.list[[15]])
 ## remove some erroneous node labels that cause issues later
@@ -82,14 +82,14 @@ tree$tip.label <- gsub("_", " ", tree$tip.label)
 eucs.test.tree <- tree 
 ## trees require branch length for analysis, this method generates it from topology-only trees allowing us to calculate genetic closeness beween taxa based on the number of nodes from the root they share instead of using the length of branches, which has been removed as part of the tree-building process anyway
 eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
-plot_dim1(tree)
+# plot_dim1(tree)
 
 
 # Preparing the matching objects that allow the package to link data frames to tree tips
 
 ## for the untransformed data
 eucs.test <- comparative.data(phy = eucs.test.tree, data = eucs.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
-### the only unmatched taxa dropped from the dataset due to having no match on the tree are: bunyip and carolaniae, dendromorpha and robusta, Tristaniopsis + a subset of chapmaniana, punctata, silvestris, strzleckii, behriana and wimmerensis
+### the only unmatched taxa dropped from the dataset due to having no match on the tree are some subset of chapmaniana, punctata, silvestris, strzleckii, behriana and wimmerensis
 eucs.test$dropped$unmatched.rows 
 # Should have no tips dropped as only taxa in the trait dataset should be on the tree
 eucs.test$dropped$tips 
@@ -195,20 +195,20 @@ dot.plot.data <- lambda.full[order(lambda.full$Lambda),]
 lambda.full.null <- lambda.full
 
 # now to plot the tree using the above ordered data frame
-#lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + theme_classic() + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + 
-#scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 30), axis.title.x = element_text(size = 30), axis.text.x = element_text(size = 30)) +labs(y= "Pagels Lambda", x="")+ coord_flip()
+lambda.dot.plot <- ggplot(dot.plot.data, aes(x=Traits, y=Lambda), dotsize = 3) + theme_classic() + geom_dotplot(binaxis='y', stackdir='center') + scale_x_discrete(limits=dot.plot.data$Traits) + 
+scale_y_continuous(limits = c(0, 1)) + geom_errorbar(aes(ymin=lower_CI, ymax=upper_CI, width=.1)) + theme(axis.text.y = element_text(size = 30), axis.title.x = element_text(size = 30), axis.text.x = element_text(size = 30)) +labs(y= "Pagels Lambda", x="")+ coord_flip()
 
 # now to save each iteration to a seperate pdf
-#ggsave(lambda.dot.plot, file = "../Output_figures/Potential_trees_and_results/lambda_values_dotplot_null.pdf", width = 15, height = 10)
+ggsave(lambda.dot.plot, file = "../Output_figures/Potential_trees_and_results/lambda_values_dotplot_null.pdf", width = 15, height = 10)
 ```
 
 All values but that calculated for Relative height were significantly different from zero, hence there is detectable phylogenetic signal in all the traits but that one. Leaf mass had a value significantly different from zero, but it was very low. However, since updating the dataset in 2022, the lowest lambda value was from relative bark thickness. The rest had moderate to high values of lambda.
 
 Relative height may not be a good trait at all and may exhibit greater variation between individuals or populations of the same taxon than between taxa themselves, i.e. potentially also not a stable trait within a taxon. Perhaps analysis of variance might help with figuring this out??
 
-# Supp Mat. Comparison of Candidate Trees
 
-## Lambda Values
+
+# Lambda Values Comparison for Above Tests
 
 Now to determine what the maximum range of lambda values are for each trait across all 15 potential trees and compare that to the size of the confidence interval for each trait's lambda value (both the CI of the single tree we will be using from later, as well as the one with the widest range among these 15).
 
@@ -230,27 +230,16 @@ compare.range.CI.trees <- data.frame('Traits' = lambda.full.null$Traits, 'rangeC
 compare.lambda.trees$min_CI_range <- unlist(lapply(as.data.frame(t(as.matrix(compare.range.CI.trees[,!names(compare.range.CI.trees) %in% c('Traits')]))), min))
 ```
 
-It can clearly be seen that even for the tree with the smallest and narrowest CI for the lambda for each trait is an order of magnitude greater than the range of all point estimates of lambda across the 15 trees for a given trait. Once we have decided ont he final tree to be used, the CI bounds and CI range for that will also be added as a final 2 columns to confirm that all 15 trees' values do fall within our final CI as well.
+It can clearly be seen that even for the tree with the smallest and narrowest CI for the lambda for each trait is an order of magnitude greater than the range of all point estimates of lambda across the 15 trees for a given trait. Once we have decided on the final tree to be used, the CI bounds and CI range for that will also be added as a final 2 columns to confirm that all 15 trees' values do fall within our final CI as well.
 
-```{r}
-# Now to add a final column containing the value CI bounds and range for the final tree we will be using 
-final.tree.lambdas <- read.csv("../Output_figures/final_tree_lambdas.csv")
-final.tree.lambdas <- final.tree.lambdas[,names(final.tree.lambdas) %in% c('Traits', 'Lambda', 'lower_CI', 'upper_CI', 'range_CI')]
+Hence, the exact positioning of the few taxa let over for which the true position on the phylogeny is unclear is not largely consequential for the calculation of lambda.
 
-final.lambda.comparisons <- left_join(compare.lambda.trees, final.tree.lambdas, by = 'Traits')
-```
+Now to check if the same is true for two of the our most sensitive correlations to lambda value.
 
 
-```{r}
-# now to export this whole table to csv to be read back into script 2
-write.csv(final.lambda.comparisons, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas.csv')
-```
+# Some Sensitive Correlations
 
-
-
-## Some Sensitive Correlations
-
-Since the lambda calcuated for a single trait in an intercept-only model is not necessarily correlated to the lambda value calculated in the residuals when that variable is orrelated with an explanatory variable, we sought to also test if there were significant differences between results of correlations that we know from preliminary analyses to be sensitive to losing statistical significance depending on whether phylogenetic relatedness of taxa are being accounted for. These relationships were SD-MH and SLA-LA.
+Since the lambda calcuated for a single trait in an intercept-only model is not necessarily correlated to the lambda value calculated in the residuals when that variable is correlated with an explanatory variable, we sought to also test if there were significant differences between results of correlations that we know from preliminary analyses to be sensitive to losing statistical significance depending on whether phylogenetic relatedness of taxa are being accounted for. These relationships were SD-MH and SLA-LA.
 
 ### SLA-LA Correlation
 
@@ -657,30 +646,18 @@ summary(mh.sd.prel.null)
 Here we can similarly see that the lambda values vary little (0.790 - 0.803) across 15 different trees and the non-significance also does not change with the p-value hovering around 0.10-0.15.
 
 
-Just a quick check to test that the differences are mainly due to updates in the dataset and not the additional taxa. I will prune down our tree back to the 160 taxa we had before adding the extra 4.
-
-```{r}
-tree.test1 <- read.tree(file = '../Input_data/final_tree.txt')
-tree.test1$node.label <- NULL
-tree.test1$tip.label <- gsub("_", " ", tree$tip.label)
-tree.test1 <- drop.tip(tree.test1, c('Corymbia eximia', 'Eucalyptus viridis', 'Eucalyptus goniocalyx subsp. viridissima', 'Eucalyptus leucoxylon subsp. pruinosa', 'Eucalyptus socialis'))
-
-eucs.test.tree <- tree.test1
-eucs.test.tree <- compute.brlen(eucs.test.tree, method = "Grafen", power = 1)
-eucs.scaled.obj <- comparative.data(phy = eucs.test.tree, data = eucs.scaled.data, names.col = taxon, vcv = TRUE, na.omit = FALSE, warn.dropped = TRUE)
+Hence, we can also conclude that the correlations are likely as unaffected by the differences in positioning of the final few taxa as the lambda values above were. Consequently, these remaining taxa can be placed as the authors see fit based on the available information and don't need to be excluded based on the uncertainty of those positions.
 
 
-sla.la.prel.test1 <- pgls(sla_mm2_per_mg ~ leaf_area_cm2, data = eucs.scaled.obj, lambda = 'ML')
-summary(sla.la.prel.test1)
-mh.sd.prel.test1 <- pgls(max_height_m ~ stem_density_g_per_ml, data = eucs.scaled.obj, lambda = 'ML')
-summary(mh.sd.prel.test1)
-```
 
 
-## Some extra tests of effect at deeper divergences
 
-(Don't need to publish this but good to know and check)
-Since we know that deep divergences are the ones that affect lambda a great deal, what if we were dealing with trees that had different or fewer outgroups (i.e. make 2 new trees without Syncarpia i.e, only Lophostemon as OG and then another using only Syncarpia as OG)
+# Supp-Mat. Lambda Table
+
+
+## Adding effects of lambda at deeper divergences i.e. outgroup taxa
+
+Since we know that deep divergences are the ones that affect lambda the most, what if we were dealing with trees that had different or fewer outgroups (i.e. make 2 new trees, one with only Lophostemon as OG and the other using only Syncarpia as OG)
 
 ### Lophostemon as OG
 
@@ -759,13 +736,13 @@ summary(lambda.sms.e1)
 # now to recreate the table of lambda values
 lambda.full.extra1 <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh.e1$param.CI$lambda$opt, lambda.rh.e1$param.CI$lambda$opt, lambda.std.e1$param.CI$lambda$opt, lambda.rbt.e1$param.CI$lambda$opt, lambda.sla.e1$param.CI$lambda$opt, lambda.lfa.e1$param.CI$lambda$opt, lambda.lms.e1$param.CI$lambda$opt, lambda.fms.e1$param.CI$lambda$opt, lambda.fwl.e1$param.CI$lambda$opt, lambda.sms.e1$param.CI$lambda$opt))
 
-# extracts the two values for boundaries of the 95% confidence interval of lamba for each model
+# extracts the two values for boundaries of the 95% confidence interval of lambda for each model
 ci.val <- c(lambda.mh.e1$param.CI$lambda$ci.val, lambda.rh.e1$param.CI$lambda$ci.val, lambda.std.e1$param.CI$lambda$ci.val, lambda.rbt.e1$param.CI$lambda$ci.val, lambda.sla.e1$param.CI$lambda$ci.val, lambda.lfa.e1$param.CI$lambda$ci.val, lambda.lms.e1$param.CI$lambda$ci.val, lambda.fms.e1$param.CI$lambda$ci.val, lambda.fwl.e1$param.CI$lambda$ci.val, lambda.sms.e1$param.CI$lambda$ci.val)
 
-# splits the CI bounds into two seperate objects, one for the lower and another for the upper bound
+# splits the CI bounds into two separate objects, one for the lower and another for the upper bound
 bounds <- divide_ci(ci.val)
 
-# constructing the full dataframe of estimate and respective bounds
+# constructing the full data frame of estimate and respective bounds
 lambda.full.extra <- cbind(lambda.full.extra1, bounds)
 ## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
 lambda.full.extra[lambda.full.extra$Traits == "Relative Height", c("lower_CI")] <- 0 
@@ -774,7 +751,7 @@ lambda.full.extra$range_CI <- lambda.full.extra$upper_CI - lambda.full.extra$low
 ```
 
 
-Now for the other tree without both outgroups.
+Now for the other tree with Syncarpia as the outgroup.
 
 
 ### Syncarpia as OG
@@ -854,13 +831,13 @@ summary(lambda.sms.e2)
 # now to recreate the table of lambda values
 lambda.full.extra2 <- data.frame('Traits' = c("Max. height", "Relative Height", "Stem Density", "Relative Bark Thickness", "SLA", "Leaf Area", "Leaf Mass", "Fruit Mass", "Fruit Wall Width", "Seed Mass"), 'Lambda' =  c(lambda.mh.e2$param.CI$lambda$opt, lambda.rh.e2$param.CI$lambda$opt, lambda.std.e2$param.CI$lambda$opt, lambda.rbt.e2$param.CI$lambda$opt, lambda.sla.e2$param.CI$lambda$opt, lambda.lfa.e2$param.CI$lambda$opt, lambda.lms.e2$param.CI$lambda$opt, lambda.fms.e2$param.CI$lambda$opt, lambda.fwl.e2$param.CI$lambda$opt, lambda.sms.e2$param.CI$lambda$opt))
 
-# extracts the two values for boundaries of the 95% confidence interval of lamba for each model
+# extracts the two values for boundaries of the 95% confidence interval of lambda for each model
 ci.val <- c(lambda.mh.e2$param.CI$lambda$ci.val, lambda.rh.e2$param.CI$lambda$ci.val, lambda.std.e2$param.CI$lambda$ci.val, lambda.rbt.e2$param.CI$lambda$ci.val, lambda.sla.e2$param.CI$lambda$ci.val, lambda.lfa.e2$param.CI$lambda$ci.val, lambda.lms.e2$param.CI$lambda$ci.val, lambda.fms.e2$param.CI$lambda$ci.val, lambda.fwl.e2$param.CI$lambda$ci.val, lambda.sms.e2$param.CI$lambda$ci.val)
 
-# splits the CI bounds into two seperate objects, one for the lower and another for the upper bound
+# splits the CI bounds into two separate objects, one for the lower and another for the upper bound
 bounds <- divide_ci(ci.val)
 
-# constructing the full dataframe of estimate and respective bounds
+# constructing the full data frame of estimate and respective bounds
 lambda.full.extra2 <- cbind(lambda.full.extra2, bounds)
 ## since the likely reason for the NA value next to relative height is that it's non-significance would take the lower bound below 0, which is technically below what values lambda can take (or is tested for by this function), hence for our purposes of calculating range and plotting error bars it is fine to replace it with 0 for now
 lambda.full.extra2[lambda.full.extra2$Traits == "Relative Height", c("lower_CI")] <- 0 
@@ -868,13 +845,14 @@ lambda.full.extra2[lambda.full.extra2$Traits == "Relative Height", c("lower_CI")
 lambda.full.extra2$range_CI <- lambda.full.extra2$upper_CI - lambda.full.extra2$lower_CI
 ```
 
+
 ### Adding both trees to table
 
 ```{r}
-# first to remove the summary columns at the end as we'll have to recalculate them after we add two columns
+# first to remove the summary columns at the end as we'll have to recalculate them after we add the two new columns
 compare.lambda.trees2 <- compare.lambda.trees[, !names(compare.lambda.trees) %in% c("range", "min_CI_range")]
 
-# now to make the two column for these two extra trees to be added to the end of existing table
+# now to make the two columns for these two extra trees that will be added to the end of the existing table from much earlier
 extra.trees.lambda <- data.frame('Lambda_OG1' = lambda.full.extra$Lambda, 'Lambda_OG2' = lambda.full.extra2$Lambda)
 
 compare.lambda.trees2 <- cbind(compare.lambda.trees2, extra.trees.lambda)
@@ -906,17 +884,18 @@ final.lambda.comparisons2 <- left_join(compare.lambda.trees2, final.tree.lambdas
 
 
 ```{r}
-# now to export this whole table to csv to be read back into script 2
+# now to export this whole table to csv
 write.csv(final.lambda.comparisons2, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2.csv')
 ```
 
 
-#### Final Formatting of Table
+## Final Formatting of Table
 
 Original horizontal version does not fit well on a page (portrait-orientation) so I'll try transposing it and see if that works.
 Also, we need to round the numbers off a bit, lets to 4 dp for now.
 
 ```{r}
+# first to read the previous table output back in just in case, since this is an adjustment of an existing file
 final.lambda.comparisons2 <- read.csv("../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2.csv")
 final.lambda.comparisons.2.2 <- as.data.frame(t(final.lambda.comparisons2))
 
@@ -927,7 +906,7 @@ df <- final.lambda.comparisons.2.2
 colnames(df) <- c("Max_height", "Relative_Height", "Stem_Density", "Relative_Bark_Thickness", "SLA", "Leaf_Area", "Leaf_Mass", "Fruit_Mass", "Fruit_Wall_Width", "Seed_Mass")
 df <- df[!row.names(df) %in% c('X', 'Traits'),]
 
-# now to round
+# now to round off the values
 df2 <- data.frame('Max. height' = unlist(lapply(df$Max_height, num_round)),
                   'Relative Height' = unlist(lapply(df$Relative_Height, num_round)), 
                   'Stem Density' = unlist(lapply(df$Stem_Density, num_round)),
@@ -942,10 +921,10 @@ row.names(df2) <- row.names(df)
 colnames(df2) <- colnames(df)
 
 final.lambda.comparisons.2.3 <- df2
-
 ```
 
 ```{r}
 write.csv(final.lambda.comparisons.2.3, file = '../Output_figures/Potential_trees_and_results/suppmat_pot_tree_lambdas2_vertical_rounded.csv')
 ```
+
 

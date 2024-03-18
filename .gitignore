@@ -5,6 +5,10 @@
 .Rapp.history
 Icon*
 Rendered_Notebooks/
-Input_data/
 Output_figures/
 Figures_final/
+all_taxa_clean.csv
+all_taxa_final.csv
+eucs_data.csv
+eucs_log_data.csv
+eucs_scaled_data.csv
