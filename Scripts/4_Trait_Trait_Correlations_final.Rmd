@@ -4,7 +4,7 @@ output: html_notebook
 ---
 # Introduction
 
-The purpose of this notebook is to run pgls trait-trait correlations and visualise the outputs. It requires that a phylogentic tree and trait-dataset in wide-format be already made and supplied. This script creates one of the two networks that comprise Figure 4 of the manuscript (the comparison of networks summarising trait correlation strengths calculated using PGLS vs. OLS analysis), though that figure is not combined in full until the following notebook '5' as well as extracting the raw data for each pgls correlation calculated and presented in supplementary Table S7.2.
+The purpose of this notebook is to run pgls trait-trait correlations and visualise the outputs. It requires that a phylogentic tree and trait-dataset in wide-format be already made and supplied. This script creates one of the two networks that comprise Figure 4 of the manuscript (the comparison of networks summarising trait correlation strengths calculated using PGLS vs. OLS analysis; exported in script 5), as well as extracting the raw data for each pgls correlation calculated and presented in supplementary Table S7.2 (exported filename 'PGLS_full_coefficients.csv').
 
 Throughout the plotting section of this notebook in the latter half, alternate versions of certain plots can be created and exported if desired by un-commenting certain lines of code. However, the minimum code required to generate the data for Figures and supplementary table will run as is.
 

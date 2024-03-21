@@ -5,7 +5,7 @@ output: html_notebook
 
 # Introduction
 
-This notebook serves to help prepare the tree to be used in this analysis and run and visualise the output of the phylogenetic signal analysis. Hence, this notebook creates Figure 3 in the manuscript and supplementary Table S3.1.
+This notebook serves to help prepare the tree to be used in this analysis and run and visualise the output of the phylogenetic signal analysis. Hence, this notebook creates Figure 3 (dot plot of ranked lambda values for continous traits; exported filename 'lambda_values_dotplot.pdf') and supplementary Table S3.1 (comparison of lambda values of 15-17 different possible trees to assess effect of different ambiguous taxon positions on analysis; exported at the end of script 3a) in the manuscript.
 
 The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
 

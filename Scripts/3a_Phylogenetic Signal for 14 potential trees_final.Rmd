@@ -5,7 +5,7 @@ output: html_notebook
 
 # Introduction
 
-This notebook serves to prepare each of the 15-17 possible candidate trees created in notebook 2 (section 'Testing Placement Effects') and run and visualise the output of the phylogenetic signal analysis (i.e. calculation of Pagel's Lambda) so that differences in those outputs can be compared. Upon selection of a final tree to be used in the main and subsequent analyses, this notebook combines the output of Lambda value calculation of this final tree with that of all the possible candidate trees (created by notebook/script 3) in a data frame subsequently used for supplementary Table S3.1 of the manuscript.
+This notebook serves to prepare each of the 15-17 possible candidate trees created in notebook 2 (section 'Testing Placement Effects') and run and visualise the output of the phylogenetic signal analysis (i.e. calculation of Pagel's Lambda) so that differences in those outputs can be compared. Upon selection of a final tree to be used in the main and subsequent analyses, this notebook combines the output of Lambda value calculation of this final tree with that of all the possible candidate trees (created by notebook/script 3) in a data frame subsequently used for supplementary Table S3.1 of the manuscript (comparison of lambda values of 15-17 different possible trees to assess effect of different ambiguous taxon positions on analysis; exported filename 'suppmat_pot_tree_lambdas2_vertical_rounded.csv').
 
 The statistical analysis was run by the `pgls()` function from the package 'caper' (Orme et al. 2018).
 

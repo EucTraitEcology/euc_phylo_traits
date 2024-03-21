@@ -9,7 +9,7 @@ This notebook aims to fit ordinary linear regression models in order to determin
 
 The dataset has been pruned to only include the 164 taxa used in the pgls analysis for comparability.
 
-This notebook also aims to create network diagrams and an ellipse table to represent the results and compare to the phylogenetic analysis. These correspond to Figures 4 and 5 in the manuscript and supplementary Table S7.1 (raw data for every correlation measured in this script using OLS models) and supplementary Figures S7 (Ellipse Table of Pearson's R) and S8 (Alternate versions of the networks without as many lines omitted).
+This notebook also aims to create network diagrams and an ellipse table to represent the results and compare to the phylogenetic analysis. These correspond to Figures 4 (exported filename 'networks_combined_r3_colorblind.pdf') and 5 (exported filename 'delta_c_sig.pdf') in the manuscript and supplementary Table S7.1 (raw data for every correlation measured in this script using OLS models; exported filename 'OLS_full_coefficients.csv') and supplementary Figures S7 (Ellipse Table of Pearson's R; exported filename 'basic_corrplot.pdf') and S8 (Alternate versions of the networks without aany (or as many) lines omitted; exported filename 'suppmat_networks.pdf').
 
 # Required Packages, Functions, and Data
 

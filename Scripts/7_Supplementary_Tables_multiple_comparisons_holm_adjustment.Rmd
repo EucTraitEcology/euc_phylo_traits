@@ -1,0 +1,105 @@
+---
+title: "Multiple comparisons"
+output: html_notebook
+---
+
+# Introduction
+
+The following script/notebook adjusts the p-values displayed in the raw data tables of the OLS and PGLS analyses (supplementary Tables S7.1 and S7.2) using the Holm correction method for multiple comparisons. The adjusted p-values can then be added as an additional column to those aforementioned supplementary tables.
+
+
+## Required Packages and Data
+
+```{r}
+# Packages
+library(dplyr)
+library(ggplot2)
+
+# Data
+
+## PGLS analysis data
+pgls.P <- readRDS("~/Dropbox/Eucs_phylo_traits/Input_data/PGLS_P.rds")
+
+## OLS analysis data
+olm.P <- readRDS("~/Dropbox/Eucs_phylo_traits/Input_data/OLM_P.rds")
+
+## logical matrix we use to select and duplicate results for the models we selected for presentation
+load("~/Dropbox/Eucs_phylo_traits/Input_data/halving_logical.RData")
+```
+
+
+## P-Value Adjustment
+
+Only the unique p-values from the more conservative half of the models we've presented in figures need adjustment, so the total list of p-values must first be subsetted to this list before adjustment. Otherwise, the adjustment is applied significantly more harshly and more conservatively due to twice the number of p-values being adjusted.
+
+```{r}
+# first we adjust the PGLS p-values
+
+## construct a symmetrical matrix of p-values corresponding to the models we have plotted, but DONT DUPLICATE THEM in their mirrored positions. 
+### Note: transpose not needed here because the 'unlist' function goes by columns and the default arrangement is columns for dependent variables so it ends up the right way int he final table
+pgls.P.half.2 <- matrix(NA, 11, 11) 
+pgls.P.half.2[log2] <- as.matrix(pgls.P)[log2]
+### give the diagonals a unique placeholder symbol to mark those rows for later removal
+diag(pgls.P.half.2) <- c(rep(1111, 11))
+### convert the matrix to a single long list by attaching column end to end in order
+pgls.P.list.full <- unlist(lapply(as.data.frame(t(pgls.P.half.2)),as.numeric))
+### check its numeric
+class(pgls.P.list.full)
+### create data frame of labels and p-values for models we will use
+pgls.P.table <- data.frame('Labels' = c(1:length(pgls.P.list.full)), 'PGLS_half' = pgls.P.list.full)
+### getting rid of the placeholder diagonal entries marked as 1111, this will then have the same pattern of missing data as where the p-values in the supplementary 'pgls full coefficients table' has unbolded rows (the main diagonal entries were excluded from that table)
+pgls.P.table <- pgls.P.table[!pgls.P.table$PGLS_half == 1111,]
+
+## Now to do the adjustment of the p-values
+### first select only the non-missing p-values in the above list to undergo adjustment
+pgls.P.table.adj <- pgls.P.table[!is.na(pgls.P.table$PGLS_half),]
+### checking if the data is being treated as numeric
+class(pgls.P.table.adj$PGLS_half)
+### add column to data frame of Holm-adjusted p-values
+pgls.P.table.adj$PGLS_P_Holm <- p.adjust(pgls.P.table.adj$PGLS_half, "holm")
+### remove the column of unadjusted p-values
+pgls.P.table.adj <- pgls.P.table.adj[c('Labels', 'PGLS_P_Holm')]
+### add adjusted p-values to original data frame using the 'Labels' column to make sure they go to the right rows (NA's should be int he same rows)
+pgls.P.table <- left_join(pgls.P.table, pgls.P.table.adj)
+
+
+# Now to adjust the OLS p-values
+
+## construct a symmetrical matrix of p-values corresponding to the models we have plotted, but DONT DUPLICATE THEM in their mirrored positions. 
+### Note: transpose not needed here because the 'unlist' function goes by columns and the default arrangement is columns for dependent variables so it ends up the right way int he final table
+olm.P.half.2 <- matrix(NA, 11, 11) 
+olm.P.half.2[log2] <- as.matrix(olm.P)[log2]
+### give the diagonals a unique placeholder symbol to mark those rows for later removal
+diag(olm.P.half.2) <- c(rep(1111, 11))
+### convert the matrix to a single long list by attaching column end to end in order
+olm.P.list.full <- unlist(lapply(as.data.frame(t(olm.P.half.2)),as.numeric))
+### check its numeric
+class(olm.P.list.full)
+### create data frame of labels and p-values for models we will use
+olm.P.table <- data.frame('Labels' = c(1:length(olm.P.list.full)), 'OLM_half' = olm.P.list.full)
+### getting rid of the placeholder diagonal entries marked as 1111, this will then have the same pattern of missing data as where the p-values in the supplementary 'pgls full coefficients table' has unbolded rows (the main diagonal entries were excluded from that table)
+olm.P.table <- olm.P.table[!olm.P.table$OLM_half == 1111,]
+
+## Now to do the adjustment of the p-values
+### first select only the non-missing p-values in the above list to undergo adjustment
+olm.P.table.adj <- olm.P.table[!is.na(olm.P.table$OLM_half),]
+### checking if the data is being treated as numeric
+class(olm.P.table.adj$OLM_half)
+### add column to data frame of Holm-adjusted p-values
+olm.P.table.adj$OLM_P_Holm <- p.adjust(olm.P.table.adj$OLM_half, "holm")
+### remove the column of unadjusted p-values
+olm.P.table.adj <- olm.P.table.adj[c('Labels', 'OLM_P_Holm')]
+### add adjusted p-values to original data frame using the 'Labels' column to make sure they go to the right rows (NA's should be int he same rows)
+olm.P.table <- left_join(olm.P.table, olm.P.table.adj)
+### get rid of NA rows in prep for joining with he pgls version
+olm.P.table.pruned <- olm.P.table[!is.na(olm.P.table$Labels),]
+
+# now to left join the OLS p-adjustment to the PGLS p-adjustment
+P.table <- left_join(pgls.P.table, olm.P.table.pruned)
+# reassign the NA values to a character string that can easily be found and replaced in ms word later
+P.table[is.na(P.table)] <- "&*()"
+
+# export final combined table
+write.csv(P.table, file = "../Output_figures/Adjusted_P_values_for_supps.csv", row.names = FALSE)
+```
+

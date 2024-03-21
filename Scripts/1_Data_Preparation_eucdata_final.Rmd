@@ -7,7 +7,7 @@ output:
 
 # Introduction
 
-The following script consolidates the data collected across multiple collecting campaigns, along with maximum height and fire response data from other databases, and performs all necessary transformations to prepare data for analysis in subsequent scripts. This script also maps collecting locations for all samples and produces Figure 1 (map if collecting locations) and supplementary Figure S2 (comparison of trait values for each of the 4 post-fire regeneration strategies).
+The following script consolidates the data collected across multiple collecting campaigns, along with maximum height and fire response data from other databases, and performs all necessary transformations to prepare data for analysis in subsequent scripts. This script also maps collecting locations for all samples and produces Figure 1 (map of collecting locations; exported filename 'map_of_collecting_locations.pdf') and supplementary Figure S2 (comparison of trait values for each of the 4 post-fire regeneration strategies; exported filename 'Testing_Stem_pos.pdf').
 
 The data are spread across four datasets: South East, Mallee, Grampians, and Stirling. These raw data are represented by the `combined_traits` object in the Input folder. These data have also been published in AusTraits.
 
@@ -888,6 +888,8 @@ rm('sieberi.mh', 'sieberi.rh', 'sieberi.sd', 'sieberi.rbt', 'sieberi.sla', 'sieb
 
 
 ## Sampling Map
+
+The following generates our map of locations across Australia from which our data was sampled used in Figure 1 of the manuscript.
 
 ```{r}
 # plainest black theme; sizes best for viewing within the Notebook output unner this code chunk

@@ -7,7 +7,7 @@ output: html_notebook
 
 The purpose of the following notebook is to use pgls to test the nature of correlations of continuous measured traits with sprouting type (i.e. fire response) of Eucalypt taxa. This version excludes our 4 stem-only resprouting taxa from any comparisons.
 
-This notebook is necessary for creating Figure 6 (effect of fire response on the 4 most affected traits: MH, RBT, SLA, LA) and supplementary Tables S2.1 and S2.2 (comparison of raw data parameters for inclusion and exclusion of 10 variably sprouting taxa in 'combination resprouter' category).
+This notebook is necessary for creating Figure 6 (effect of fire response on the 4 most affected traits: MH, RBT, SLA, LA; exported filename 'multi_boxplots.pdf') and supplementary Tables S2.1 and S2.2 (comparison of raw data parameters for inclusion and exclusion of 10 variably sprouting taxa in 'combination resprouter' category; exported filenames 'incl_variable_taxa.csv' and 'excl_variable_taxa.csv').
 
 # Required Packages, Functions and Data
 
