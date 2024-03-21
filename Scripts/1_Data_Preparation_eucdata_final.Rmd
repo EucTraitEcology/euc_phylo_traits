@@ -369,7 +369,9 @@ Our final datasets generated above include all the taxa that will be used in sub
 
 ## Testing Stem Sprouter Position
 
-Here we see where in the dataset stem sprouters fall in order to decide if they're worth differentiating from other categories or can be absorbed into the combination resprouters or something, since there's only 4 of them. We're using similar code to the next section where we compared E. sieberi back when it was the only stem-only resprouter that we had (before we included other databases and sources to fill in the gaps in knowledge of fire responses of taxa). Now we have 4 of them, but E. sieberi is no longer one of them as new evidence suggests it can resprout from a lignotuber when stem diameter is up to ~10cm.
+Here we see where in the dataset stem sprouters fall in order to decide if they're worth differentiating from other categories or can be absorbed into the combination resprouters or otherwse recategorised , since there's only 4 of them. We're using similar code to the next section where we compared E. sieberi back when it was the only stem-only resprouter that we had (before we included other databases and sources to fill in the gaps in knowledge of fire responses of taxa). Now we have 4 of them, but E. sieberi is no longer one of them as new evidence suggests it can resprout from a lignotuber when stem diameter is up to ~10cm.
+
+The following exported figure is also later used in supplementary Figure S2 as it includes an overview of all traits in each of the fire response categories.
 
 
 ```{r}
@@ -542,11 +544,162 @@ pdf("../Output_figures/Testing_Stem_pos.pdf", width = 21, height = 30)
 grid.arrange(stemsp.mh, stemsp.rh, stemsp.sd, stemsp.rbt, stemsp.sla, stemsp.la, stemsp.lm, stemsp.fww, stemsp.fm, stemsp.sm, nrow = 4)
 dev.off()
 
-## if that pdf looks fine, the following removes the objects we just created from the environment now that they are uneccessary going forward (especially if all scripts will be run without clearing the environment between)
+## if that pdf looks fine, the following removes the objects we just created from the environment now that they are unnecessary going forward (especially if all scripts will be run without clearing the environment between)
 rm('stemsp.mh', 'stemsp.rh', 'stemsp.sd', 'stemsp.rbt', 'stemsp.sla', 'stemsp.la', 'stemsp.lm', 'stemsp.fww', 'stemsp.fm', 'stemsp.sm')
 ```
 
 
+## Testing Ligno-Only Position
+
+The following section constructs boxplots to compare the lignotuber-only fire response strategy (also referred to as the basal-only resprouter category) to the others for each trait.
+
+```{r}
+# first to create a modified version of the unscaled and untransformed data with an additional column re-categorising the fire response data into a binary
+LO.box.data <- eucs.data
+LO.box.data$LO2[LO.box.data$Sprouting_Type3 == 'Lignotuber_Only'] <- 'Lignotuber_Only_Resprouter'
+LO.box.data$LO2[!LO.box.data$Sprouting_Type3 == 'Lignotuber_Only' & !is.na(LO.box.data$LO2)] <- "Other_Strategy"
+LO.box.data$LO2 <- as.factor(LO.box.data$LO2)
+levels(LO.box.data$LO2)
+LO.box.data[LO.box.data$taxon == 'Eucalyptus cyanophylla',c('LO2')]
+
+# for convenience, here are the visually optimal scale break labels on the continuous axes for each variable:
+mh.breaks <- c(1, 3, 10, 30, 100)
+rh.breaks <- c(6, 10, 20, 30)
+sd.breaks <-c(0.51,0.55, 0.60, 0.70, 0.80)
+rbt.breaks <- c(2, 5, 10, 20, 40)
+sla.breaks <- c(2,4,8)
+la.breaks <- c(3,10,30,100)
+lm.breaks <- c(0.1, 0.3, 1, 3)
+fww.breaks <- c(0.5, 1, 2, 4)
+fm.breaks <- c(50, 500, 5000)
+sm.breaks <- c(0.5, 5, 50)
+
+
+mh.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = max_height_m, fill = LO2)) +
+  geom_point(aes(y = max_height_m, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = mh.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Maximum Height (m)", x = "")
+
+rh.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = relative_height_by_girth, fill = LO2)) +
+  geom_point(aes(y = relative_height_by_girth, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = rh.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Relative Height (m)", x = "")
+
+sd.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = stem_density_g_per_ml, fill = LO2)) +
+  geom_point(aes(y = stem_density_g_per_ml, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sd.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Stem Sapwood Density (g/ml)", x = "")
+
+rbt.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = relative_bt_by_girth, fill = LO2)) +
+  geom_point(aes(y = relative_bt_by_girth, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = rbt.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Reltive Bark Thickness (mm)", x = "")
+
+sla.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = sla_mm2_per_mg, fill = LO2)) +
+  geom_point(aes(y = sla_mm2_per_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sla.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="SLA (mm2/mg)", x = "")
+
+la.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = leaf_area_cm2, fill = LO2)) +
+  geom_point(aes(y = leaf_area_cm2, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = la.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Area (cm2)", x = "")
+
+lm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = leaf_mass_g, fill = LO2)) +
+  geom_point(aes(y = leaf_mass_g, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = lm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Leaf Mass (g)", x = "")
+
+fww.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = fruit_wall_width_mm, fill = LO2)) +
+  geom_point(aes(y = fruit_wall_width_mm, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = fww.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Wall Width (mm)", x = "")
+
+fm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = fruit_mass_mg, fill = LO2)) +
+  geom_point(aes(y = fruit_mass_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = fm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Fruit Mass (mg)", x = "")
+
+sm.LO <- ggplot(data = LO.box.data, 
+         aes(x = LO2, y = seed_mass_mg, fill = LO2)) +
+  geom_point(aes(y = seed_mass_mg, color = LO2), position = position_jitter(width = .15, seed =1), size = 2, alpha = 0.6) + scale_color_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) +
+  geom_boxplot(width = .6, outlier.shape = NA, alpha = 0.15) +
+  expand_limits(x = 1) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) + 
+  scale_fill_manual(values = c("Lignotuber_Only_Resprouter"="#7E03A8FF",
+                              "Other_Strategy"="#F8E125FF")) + scale_x_discrete(limits = c("Lignotuber_Only_Resprouter", "Other_Strategy"), labels = c( "Basal-Only\nResprouter", "Other\nStrategy")) + scale_y_continuous(trans = "log10", breaks = sm.breaks) + coord_flip() + theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), axis.text.x = element_text(size = 25), axis.text.y = element_text(size = 25), axis.title.x = element_text(size = 25, vjust = -1.5), plot.margin = margin(l=0.1,b=2,1,1, "cm")) + labs(y="Seed Mass (mg)", x = "")
+
+# now to export these boxplots as a single-page figure
+pdf("../Output_figures/Testing_BOS_pos.pdf", width = 21, height = 30)
+grid.arrange(mh.LO, rh.LO, sd.LO, rbt.LO, sla.LO, la.LO, lm.LO, fww.LO, fm.LO, sm.LO, nrow = 4)
+dev.off()
+```
 
 ## Testing Sieberi Position
 

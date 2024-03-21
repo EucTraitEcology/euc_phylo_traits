@@ -12,3 +12,17 @@ all_taxa_final.csv
 eucs_data.csv
 eucs_log_data.csv
 eucs_scaled_data.csv
+pgls_models_list.rda
+matrix_r.RData
+matrix_r_half.RData
+sig_only_r_half.RData
+network_r3_obj.RData
+lambda_matrix.RData
+lambda_matrix_half.RData
+pgls_coeff_matrix.RData
+pgls_coeff_matrix_half.RData
+pgls_sig_models.RData
+halving_logical.RData
+PGLS_coefficients_full.rds
+PGLS_P.rds
+OLM_coefficients_full.rds
